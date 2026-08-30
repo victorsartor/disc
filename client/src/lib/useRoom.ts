@@ -10,6 +10,7 @@ import {
 } from 'livekit-client';
 import type { Message, Settings } from '../types';
 import { playJoin, playLeave, playConnect } from './sounds';
+import { Mic } from './mic';
 
 export interface Peer {
   identity: string;
@@ -89,6 +90,8 @@ export function useRoom(onChatMessage: (m: Message) => void) {
   // em que a sala foi criada e ficariam com estado velho.
   const deafenedRef = useRef(false);
   const micBeforeDeafenRef = useRef(true);
+  /** O microfone com portao de ruido. null = caiu no caminho antigo. */
+  const micRef = useRef<Mic | null>(null);
   /** identity -> ensurdecido, do que cada um anunciou. */
   const remoteDeafRef = useRef(new Map<string, boolean>());
 
@@ -116,15 +119,70 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     });
   }, []);
 
+  /**
+   * Troca o microfone publicado por um novo.
+   *
+   * Necessario quando muda o dispositivo ou qualquer filtro do Chromium
+   * (supressao, eco, ganho automatico): essas opcoes entram no
+   * getUserMedia e nao dao pra mudar numa faixa que ja existe.
+   *
+   * A nova e aberta ANTES de a antiga sair. Se a captura falhar - alguem
+   * escolheu um microfone que foi desconectado - o que estava no ar
+   * continua no ar.
+   */
+  const rebuildMic = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+    const cfg = settingsRef.current;
+    const antiga = micRef.current;
+
+    try {
+      const mic = await Mic.abrir({
+        deviceId: cfg?.micDeviceId ?? null,
+        echoCancellation: cfg?.echoCancellation ?? true,
+        noiseSuppression: cfg?.noiseSuppression ?? true,
+        autoGainControl: cfg?.autoGainControl ?? true,
+      });
+      mic.corte = cfg?.micSensitivity ?? 0;
+      mic.portaoLigado = cfg?.voiceMode !== 'ptt';
+
+      const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+      if (pub?.track) await room.localParticipant.unpublishTrack(pub.track, true);
+
+      micRef.current = mic;
+      await room.localParticipant.publishTrack(mic.track, {
+        source: Track.Source.Microphone,
+      });
+      antiga?.fechar();
+      // Nao chama syncPeers aqui: o LocalTrackPublished ja dispara.
+    } catch (err) {
+      console.warn('nao consegui trocar o microfone', err);
+      setError('nao consegui abrir esse microfone');
+    }
+  }, []);
+
   const updateSettings = useCallback(async (patch: Partial<Settings>) => {
     const next = await window.disc.settings.patch(patch);
     settingsRef.current = next;
     setSettings(next);
 
+    // Corte e modo de voz o portao aceita a quente, sem recapturar nada.
+    const mic = micRef.current;
+    if (mic) {
+      if (patch.micSensitivity !== undefined) mic.corte = next.micSensitivity;
+      if (patch.voiceMode !== undefined) mic.portaoLigado = next.voiceMode !== 'ptt';
+    }
+
     const room = roomRef.current;
     if (room) {
-      if (patch.micDeviceId) await room.switchActiveDevice('audioinput', patch.micDeviceId);
       if (patch.speakerDeviceId) await room.switchActiveDevice('audiooutput', patch.speakerDeviceId);
+      // Estes so existem no momento da captura: exigem microfone novo.
+      const recaptura =
+        patch.micDeviceId !== undefined ||
+        patch.noiseSuppression !== undefined ||
+        patch.echoCancellation !== undefined ||
+        patch.autoGainControl !== undefined;
+      if (recaptura) await rebuildMic();
     }
     // Ao voltar pro modo VAD, o mic deve reabrir sozinho.
     if (patch.voiceMode === 'vad') {
@@ -188,6 +246,10 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     const room = roomRef.current;
     roomRef.current = null;
     if (room) await room.disconnect();
+    // Solta o microfone de verdade: sem isto a luzinha do mic fica acesa
+    // depois de sair do canal.
+    micRef.current?.fechar();
+    micRef.current = null;
     remoteDeafRef.current.clear();
     setChannelId(null);
     setPeers([]);
@@ -264,6 +326,8 @@ export function useRoom(onChatMessage: (m: Message) => void) {
           .on(RoomEvent.LocalTrackUnpublished, syncPeers)
           .on(RoomEvent.Disconnected, () => {
             roomRef.current = null;
+            micRef.current?.fechar();
+            micRef.current = null;
             remoteDeafRef.current.clear();
             setChannelId(null);
             setPeers([]);
@@ -342,6 +406,32 @@ export function useRoom(onChatMessage: (m: Message) => void) {
         await room.startAudio().catch(() => {
           /* o AudioPlaybackStatusChanged cobre se ainda assim bloquear */
         });
+
+        // Publica a faixa JA filtrada pelo portao de ruido (lib/mic.ts) no
+        // lugar da crua do getUserMedia. Como ela vai com source Microphone,
+        // todo o resto continua funcionando igual - o setMicrophoneEnabled
+        // reaproveita a publicacao que ja existe em vez de criar outra.
+        try {
+          const cfg = settingsRef.current;
+          const mic = await Mic.abrir({
+            deviceId: cfg?.micDeviceId ?? null,
+            echoCancellation: cfg?.echoCancellation ?? true,
+            noiseSuppression: cfg?.noiseSuppression ?? true,
+            autoGainControl: cfg?.autoGainControl ?? true,
+          });
+          mic.corte = cfg?.micSensitivity ?? 0;
+          mic.portaoLigado = cfg?.voiceMode !== 'ptt';
+          micRef.current = mic;
+          await room.localParticipant.publishTrack(mic.track, {
+            source: Track.Source.Microphone,
+          });
+        } catch (err) {
+          // Ficar sem voz seria pior que ficar sem portao: cai no caminho
+          // antigo, que e o que rodava antes desta funcionalidade existir.
+          console.warn('portao de ruido indisponivel, publicando o mic cru', err);
+          micRef.current = null;
+          await room.localParticipant.setMicrophoneEnabled(true);
+        }
 
         // Em PTT o microfone comeca fechado e so abre com a tecla presa.
         const startMuted = settingsRef.current?.voiceMode === 'ptt';
@@ -532,9 +622,18 @@ export function useRoom(onChatMessage: (m: Message) => void) {
   // Desconecta limpo ao fechar o app
   useEffect(() => () => void roomRef.current?.disconnect(), []);
 
+  /**
+   * Nivel do microfone, 0 a 100, pro medidor das configuracoes.
+   *
+   * E funcao, e nao estado, de proposito: isto muda 20 vezes por segundo, e
+   * como estado obrigaria o app inteiro a re-renderizar nesse ritmo. Quem
+   * quiser o medidor faz seu proprio intervalo enquanto a tela esta aberta.
+   */
+  const micLevel = useCallback(() => micRef.current?.nivel ?? null, []);
+
   return {
     settings, channelId, connecting, peers, screens, audios, screenVolumes,
-    micOn: micLive, micWanted, pttDown, deafened, sharing, error,
+    micOn: micLive, micWanted, pttDown, deafened, sharing, error, micLevel,
     connect, disconnect, toggleMic, toggleDeafen, setPeerVolume, setScreenVolume,
     startShare, stopShare, broadcastChat, updateSettings,
   };

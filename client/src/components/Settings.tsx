@@ -5,17 +5,48 @@ import { Select } from './Select';
 interface Props {
   settings: SettingsType;
   onPatch: (patch: Partial<SettingsType>) => Promise<SettingsType>;
+  /** Nível do microfone agora, 0 a 100. null = fora de canal. */
+  micLevel: () => number | null;
   onClose: () => void;
+}
+
+/**
+ * Medidor de entrada com a linha de corte por cima.
+ *
+ * Sem ver o próprio nível, escolher a sensibilidade é adivinhação: o número
+ * não significa nada até você falar e ver onde a barra chega. Com a linha
+ * desenhada em cima fica óbvio o que passa e o que fica de fora.
+ */
+function Medidor({ nivel, corte }: { nivel: number | null; corte: number }) {
+  const passando = nivel !== null && nivel >= corte;
+
+  return (
+    <div className="medidor">
+      <div
+        className={`medidor__nivel${passando ? ' medidor__nivel--passa' : ''}`}
+        style={{ width: `${nivel ?? 0}%` }}
+      />
+      <div className="medidor__corte" style={{ left: `${corte}%` }} />
+    </div>
+  );
 }
 
 /** Depois desse tempo sem tecla nenhuma, a captura desiste sozinha. */
 const CAPTURE_TIMEOUT = 15000;
 
-export function Settings({ settings, onPatch, onClose }: Props) {
+export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
   const [speakers, setSpeakers] = useState<MediaDeviceInfo[]>([]);
   const [capturing, setCapturing] = useState(false);
   const [justBound, setJustBound] = useState(false);
+  const [nivel, setNivel] = useState<number | null>(null);
+
+  // O medidor só pulsa enquanto esta tela está aberta. Fora daqui ninguém
+  // olha, e re-renderizar 20 vezes por segundo à toa custa bateria.
+  useEffect(() => {
+    const id = window.setInterval(() => setNivel(micLevel()), 50);
+    return () => window.clearInterval(id);
+  }, [micLevel]);
 
   // onPatch vem do useRoom e pode trocar de identidade a cada render. Numa
   // dependencia de efeito isso rearmaria a captura no meio dela.
@@ -179,6 +210,78 @@ export function Settings({ settings, onPatch, onClose }: Props) {
                 </p>
               </>
             )}
+          </section>
+
+          <section className="settings__group">
+            <h3 className="settings__title">Sensibilidade do microfone</h3>
+
+            <Medidor nivel={nivel} corte={settings.micSensitivity} />
+
+            <input
+              type="range"
+              className="volume__slider"
+              min={0}
+              max={60}
+              step={1}
+              value={settings.micSensitivity}
+              aria-label="Sensibilidade do microfone"
+              onChange={(e) => void onPatch({ micSensitivity: Number(e.target.value) })}
+            />
+
+            <p className="settings__hint">
+              {nivel === null
+                ? 'Entre num canal de voz para ver o medidor se mexer.'
+                : settings.micSensitivity === 0
+                  ? 'Portão desligado: tudo que o microfone captar vai pro ar.'
+                  : 'Só passa o que ultrapassar a linha. Fale normal e suba até o '
+                    + 'ruído de fundo parar de acender a barra.'}
+            </p>
+
+            {settings.voiceMode === 'ptt' && (
+              <p className="settings__hint settings__hint--warn">
+                Em apertar para falar o portão não age — quem decide é a tecla.
+              </p>
+            )}
+          </section>
+
+          <section className="settings__group">
+            <h3 className="settings__title">Tratamento do som</h3>
+
+            <label className="settings__row">
+              <span className="settings__label">Supressão de ruído</span>
+              <input
+                type="checkbox"
+                className="settings__check"
+                checked={settings.noiseSuppression}
+                onChange={(e) => void onPatch({ noiseSuppression: e.target.checked })}
+              />
+            </label>
+
+            <label className="settings__row">
+              <span className="settings__label">Cancelamento de eco</span>
+              <input
+                type="checkbox"
+                className="settings__check"
+                checked={settings.echoCancellation}
+                onChange={(e) => void onPatch({ echoCancellation: e.target.checked })}
+              />
+            </label>
+
+            <label className="settings__row">
+              <span className="settings__label">Ganho automático</span>
+              <input
+                type="checkbox"
+                className="settings__check"
+                checked={settings.autoGainControl}
+                onChange={(e) => void onPatch({ autoGainControl: e.target.checked })}
+              />
+            </label>
+
+            <p className="settings__hint">
+              O ganho automático nivela sua voz — e, nas pausas, amplifica o
+              silêncio junto. Se o microfone parecer pegar tudo mesmo com o
+              portão ajustado, desligue este primeiro.
+            </p>
           </section>
 
           <section className="settings__group">

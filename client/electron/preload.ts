@@ -41,6 +41,10 @@ const api = {
       ipcRenderer.invoke('api:profile-image', kind, dataUrl),
   },
 
+  /** Cores dos botoes de janela: a barra e do SO e nao le o CSS do tema. */
+  titlebar: (color: string, symbolColor: string): Promise<void> =>
+    ipcRenderer.invoke('window:titlebar', color, symbolColor),
+
   screenSources: () => ipcRenderer.invoke('screen:sources'),
 
   copy: (text: string) => ipcRenderer.invoke('clipboard:write', text),

@@ -65,6 +65,15 @@ export function App() {
     } catch {
       /* sem armazenamento: só perde o atalho contra o clarão */
     }
+
+    // A barra de título é desenhada pelo Windows e não lê CSS: sem este
+    // aviso, trocar pro Ártico deixaria três símbolos brancos sobre fundo
+    // branco. Lemos o computado em vez de manter uma tabela de cores aqui,
+    // pra que o themes.css continue sendo a única fonte da verdade.
+    const cores = getComputedStyle(document.documentElement);
+    const fundo = cores.getPropertyValue('--level-2').trim();
+    const simbolo = cores.getPropertyValue('--alabaster').trim();
+    if (fundo && simbolo) void window.disc.titlebar(fundo, simbolo);
   }, [theme, settingsCarregou]);
 
   const presence = usePresence(Boolean(loggedIn), room.channelId);
@@ -244,6 +253,7 @@ export function App() {
         <Settings
           settings={room.settings}
           onPatch={room.updateSettings}
+          micLevel={room.micLevel}
           onClose={() => setSettingsOpen(false)}
         />
       )}

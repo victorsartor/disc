@@ -10,10 +10,16 @@
 
          img-src aceita http://localhost:3000 so por causa do dev: as fotos
          de perfil sao servidas pelo backend, e em desenvolvimento ele e
-         http. Em producao a URL e https e ja estaria coberta. -->
+         http. Em producao a URL e https e ja estaria coberta.
+
+         E aceita blob: porque escolher uma foto passa por
+         URL.createObjectURL (ver lib/image.ts): o arquivo local vira uma
+         URL blob: pra ser medido e redimensionado antes de subir. Sem isto
+         o Chromium recusa a imagem e o upload morre com "nao consegui abrir
+         essa imagem", sem dizer que a culpa foi do CSP. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https: http://localhost:3000; media-src 'self' blob:; connect-src 'self' https: wss:;"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: http://localhost:3000; media-src 'self' blob:; connect-src 'self' https: wss:;"
     />
     <title>Disneia</title>
   </head>

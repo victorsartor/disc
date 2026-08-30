@@ -112,6 +112,13 @@ function handleDeepLink(url: string | undefined): void {
 // de texto e o proprio Chromium, nao os itens deste menu.
 if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
 
+/**
+ * Altura da faixa dos botoes de janela. Bate com a .topbar do app pra que
+ * minimizar/maximizar/fechar pousem na mesma linha da barra de cima em vez
+ * de flutuarem num degrau proprio.
+ */
+const TITLEBAR_HEIGHT = 52;
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1200,
@@ -120,6 +127,20 @@ function createWindow(): void {
     minHeight: 600,
     backgroundColor: '#0d1b2a',
     autoHideMenuBar: true,
+    // Sem barra de titulo nativa: nome e icone do app saem, e ficam so os
+    // tres botoes de janela, desenhados pelo Windows por cima do conteudo.
+    // A identificacao passa a viver dentro do app, na sidebar - que e onde a
+    // marca cabe grande o bastante pra ser lida. No titulo ela ia pra 16px e
+    // virava um borrao.
+    //
+    // Isto tira o lugar de arrastar a janela: quem assume sao as faixas
+    // marcadas com -webkit-app-region no theme.css.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#1b263b',       // --level-2 do tema padrao; troca com o tema
+      symbolColor: '#e0e1dd', // --alabaster
+      height: TITLEBAR_HEIGHT,
+    },
     webPreferences: {
       preload: join(__dirname, 'preload.mjs'),
       contextIsolation: true,   // renderer isolado do Node
@@ -204,6 +225,30 @@ ipcMain.handle('auth:login', () => shell.openExternal(`${SERVER_URL}/auth/login`
 ipcMain.handle('auth:logout', () => {
   saveSession(null);
   win?.webContents.send('auth:changed', false);
+});
+
+// --- IPC: barra de titulo ------------------------------------------------
+/**
+ * Repinta os botoes de janela quando o tema muda.
+ *
+ * A barra e desenhada pelo SO, nao pelo CSS - trocar pro tema Artico, que e
+ * claro, deixaria tres simbolos brancos sobre fundo branco se ninguem
+ * avisasse o Windows.
+ *
+ * As cores vem do renderer, entao passam por validacao: so hex de 6 digitos.
+ * IPC e fronteira de confianca como qualquer outra.
+ */
+const HEX = /^#[0-9a-fA-F]{6}$/;
+
+ipcMain.handle('window:titlebar', (_e, color: unknown, symbolColor: unknown) => {
+  if (process.platform === 'darwin') return;
+  if (typeof color !== 'string' || typeof symbolColor !== 'string') return;
+  if (!HEX.test(color) || !HEX.test(symbolColor)) return;
+  try {
+    win?.setTitleBarOverlay({ color, symbolColor, height: TITLEBAR_HEIGHT });
+  } catch {
+    /* janela ja fechada, ou plataforma sem suporte: cor errada nao quebra nada */
+  }
 });
 
 // --- IPC: atualizacao ----------------------------------------------------

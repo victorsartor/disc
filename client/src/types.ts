@@ -88,6 +88,11 @@ export interface Settings {
   pttKeyLabel: string;
   micDeviceId: string | null;
   speakerDeviceId: string | null;
+  /** Corte do portão de ruído, 0 a 100. 0 desliga o portão. */
+  micSensitivity: number;
+  noiseSuppression: boolean;
+  echoCancellation: boolean;
+  autoGainControl: boolean;
   volumes: Record<string, number>;
   /** identity -> volume do som da tela daquela pessoa (0 a 1). */
   screenVolumes: Record<string, number>;
@@ -142,6 +147,8 @@ export interface DiscApi {
     /** dataUrl null remove: a capa some, a foto volta pra do Google. */
     image(kind: 'avatar' | 'banner', dataUrl: string | null): Promise<{ user: UserProfile }>;
   };
+  /** Cores dos botões de janela: a barra é do SO e não lê o CSS do tema. */
+  titlebar(color: string, symbolColor: string): Promise<void>;
   screenSources(): Promise<ScreenSource[]>;
   copy(text: string): Promise<void>;
   settings: {

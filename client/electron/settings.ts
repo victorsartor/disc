@@ -11,6 +11,17 @@ export interface Settings {
   pttKeyLabel: string;
   micDeviceId: string | null;
   speakerDeviceId: string | null;
+  /**
+   * Corte do portao de ruido, de 0 a 100, na mesma escala do medidor.
+   * 0 desliga o portao: tudo que o microfone captar vai pro ar.
+   */
+  micSensitivity: number;
+  /** Supressao de ruido do proprio Chromium (WebRTC NS). */
+  noiseSuppression: boolean;
+  echoCancellation: boolean;
+  /** Ganho automatico. Ligado, ele AMPLIFICA o silencio entre as frases -
+   *  e a causa classica de "meu microfone pega tudo". */
+  autoGainControl: boolean;
   /** identity -> multiplicador de volume da VOZ (0 a 2) */
   volumes: Record<string, number>;
   /** identity -> volume do SOM DA TELA daquela pessoa (0 a 1) */
@@ -28,6 +39,12 @@ const DEFAULTS: Settings = {
   pttKeyLabel: '',
   micDeviceId: null,
   speakerDeviceId: null,
+  // 8 corta ventilador e ar-condicionado sem engolir quem fala baixo. Quem
+  // quiser o comportamento antigo (tudo passa) e so zerar.
+  micSensitivity: 8,
+  noiseSuppression: true,
+  echoCancellation: true,
+  autoGainControl: true,
   volumes: {},
   screenVolumes: {},
   overlayEnabled: true,
@@ -73,8 +90,9 @@ export function getSettings(): Settings {
  */
 const ALLOWED_KEYS = new Set<keyof Settings>([
   'voiceMode', 'pttKeycode', 'pttKeyLabel', 'micDeviceId',
-  'speakerDeviceId', 'volumes', 'screenVolumes', 'overlayEnabled',
-  'overlayX', 'overlayY', 'theme',
+  'speakerDeviceId', 'micSensitivity', 'noiseSuppression',
+  'echoCancellation', 'autoGainControl', 'volumes', 'screenVolumes',
+  'overlayEnabled', 'overlayX', 'overlayY', 'theme',
 ]);
 
 export function sanitizePatch(input: unknown): Partial<Settings> {

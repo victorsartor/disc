@@ -1,7 +1,7 @@
 {
   "name": "disneia-client",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.10.0",
   "description": "Voz, chat e compartilhamento de tela para um grupo fechado de amigos",
   "author": "Victor",
   "type": "module",
