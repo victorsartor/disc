@@ -15,6 +15,7 @@ import { ObsSetup } from './components/ObsSetup';
 import { Profile, UserCard } from './components/Profile';
 import { IconScreen, IconBroadcast, IconEye, IconEyeOff } from './components/Icons';
 import { DEFAULT_THEME, isThemeId, type ThemeId } from './lib/themes';
+import { playNotify } from './lib/sounds';
 
 export function App() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -37,11 +38,21 @@ export function App() {
   // Guarda os ids já vistos para o data channel não duplicar o que o
   // polling também trouxe (e vice-versa).
   const seenRef = useRef<Set<number>>(new Set());
+  // Refs, não state: addMessage precisa do valor de agora sem entrar na
+  // lista de dependências do useCallback - senão toda troca de `me` ou de
+  // fase do histórico recriaria a função e, com ela, o `room` que a usa.
+  const meRef = useRef<Me | null>(null);
+  meRef.current = me;
+  // true só depois que a primeira leva de mensagens (o histórico) já
+  // passou. Sem isto, entrar num canal com conversa parada tocaria uma
+  // notificação pra cada mensagem antiga.
+  const historicoCarregadoRef = useRef(false);
 
   const addMessage = useCallback((m: Message) => {
     if (seenRef.current.has(m.id)) return;
     seenRef.current.add(m.id);
     setMessages((prev) => [...prev, m].sort((a, b) => a.id - b.id));
+    if (historicoCarregadoRef.current && m.user_id !== meRef.current?.id) playNotify();
   }, []);
 
   const room = useRoom(addMessage);
@@ -126,6 +137,9 @@ export function App() {
   useEffect(() => {
     if (!loggedIn) return;
     let alive = true;
+    // Zera a cada login: quem sai e entra de novo vê o histórico de novo
+    // sem barulho, do mesmo jeito que na primeira vez.
+    historicoCarregadoRef.current = false;
 
     const load = async () => {
       try {
@@ -134,6 +148,8 @@ export function App() {
         for (const m of messages) addMessage(m);
       } catch {
         /* offline momentâneo: a próxima volta pega */
+      } finally {
+        historicoCarregadoRef.current = true;
       }
     };
 

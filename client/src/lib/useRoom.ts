@@ -12,7 +12,9 @@ import {
   type Participant,
 } from 'livekit-client';
 import type { Message, Settings } from '../types';
-import { playJoin, playLeave, playConnect } from './sounds';
+import {
+  playJoin, playLeave, playConnect, playDisconnect, playShareStart, playShareStop,
+} from './sounds';
 import { Mic } from './mic';
 
 export interface Peer {
@@ -435,6 +437,10 @@ export function useRoom(onChatMessage: (m: Message) => void) {
             setScreens([]);
             setAudios([]);
             setSharing(false);
+            // Aqui, e nao no disconnect() do hook: assim cobre tambem queda
+            // de conexao e o servidor fechando a sala, nao so quem clicou
+            // pra sair.
+            playDisconnect();
           })
           .on(RoomEvent.DataReceived, (payload: Uint8Array, from?: RemoteParticipant) => {
             try {
@@ -482,6 +488,7 @@ export function useRoom(onChatMessage: (m: Message) => void) {
                   ...prev.filter((s) => s.identity !== participant.identity),
                   { identity: participant.identity, name: participant.name || participant.identity, track },
                 ]);
+                playShareStart();
               }
               syncPeers();
             },
@@ -492,6 +499,7 @@ export function useRoom(onChatMessage: (m: Message) => void) {
             }
             if (track.source === Track.Source.ScreenShare) {
               setScreens((prev) => prev.filter((s) => s.track !== track));
+              playShareStop();
             }
             syncPeers();
           })
@@ -694,6 +702,7 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     }
     setSharing(false);
     setLocalScreen(null);
+    playShareStop();
     syncPeers();
   }, [syncPeers]);
 
@@ -788,6 +797,7 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     // segunda captura que poderia divergir.
     setLocalScreen(videoTrack);
     setSharing(true);
+    playShareStart();
     syncPeers();
   }, [syncPeers, stopShare]);
 
