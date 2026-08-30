@@ -1,6 +1,6 @@
 import {
   app, BrowserWindow, ipcMain, shell, safeStorage,
-  desktopCapturer, globalShortcut, clipboard, Menu,
+  desktopCapturer, globalShortcut, clipboard, Menu, session,
 } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,26 @@ import {
 } from './updater.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// No Wayland, o Chromium so enxerga janelas/telas pra compartilhar atraves
+// do portal de tela (xdg-desktop-portal), que fica atras desta feature flag.
+// Sem ela, desktopCapturer.getSources() volta uma lista vazia pra sempre -
+// era exatamente o "Procurando janelas..." nunca resolver no Linux. Tem que
+// ser antes do app ficar pronto; nao faz nada em X11 nem em outra plataforma.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
+  // Sem isto o app roda por XWayland (caminho X11) enquanto so a captura vai
+  // pelo caminho Wayland. Metade em cada lado e o que faz o portal abrir,
+  // a pessoa escolher a tela, e a lista voltar vazia mesmo assim.
+  app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+}
+
+// Identidade da janela pro Windows, e tem que bater com o appId do
+// electron-builder. Sem isto o Electron chuta um AppUserModelID a partir do
+// caminho do executavel: a janela deixa de casar com o atalho instalado, o
+// icone fixado na barra de tarefas abre um segundo grupo em vez de acender o
+// que ja esta la, e as notificacoes saem assinadas com o nome errado.
+if (process.platform === 'win32') app.setAppUserModelId('com.disneia.app');
 
 // URL do servidor. Em dev aponta pro backend local; em producao, pro DuckDNS.
 const SERVER_URL = process.env.VITE_SERVER_URL ?? 'http://localhost:3000';
@@ -168,6 +188,41 @@ function createWindow(): void {
   });
 }
 
+/**
+ * Caminho do Wayland: o portal e quem escolhe, numa requisicao so.
+ *
+ * No X11 e no Windows a lista de fontes vive: da pra pedir getSources(),
+ * desenhar um menu nosso, e so depois abrir a que a pessoa escolheu. No
+ * Wayland nao - o id que o getSources() devolve (um marcador tipo
+ * "window:1:0", sem nome) so vale enquanto a sessao do portal que o criou
+ * estiver aberta. Entre listar e escolher no NOSSO modal essa sessao morre,
+ * e a abertura falha com "target not found" vindo do PipeWire.
+ *
+ * Aqui getSources() e a entrega da fonte acontecem dentro da MESMA
+ * requisicao de getDisplayMedia, entao a sessao continua viva no meio do
+ * caminho. Quem desenha o seletor passa a ser o proprio KDE/GNOME.
+ */
+function initDisplayMedia(): void {
+  session.defaultSession.setDisplayMediaRequestHandler((_req, callback) => {
+    desktopCapturer
+      .getSources({ types: ['screen', 'window'] })
+      .then((sources) => {
+        const fonte = sources[0];
+        if (!fonte) {
+          // callback sem streams = pedido negado. O renderer recebe o erro
+          // e mostra a mensagem, em vez de ficar esperando pra sempre.
+          callback({});
+          return;
+        }
+        callback({ video: fonte });
+      })
+      .catch((err) => {
+        console.error('[display-media] getSources falhou', err);
+        callback({});
+      });
+  });
+}
+
 // --- Instancia unica (necessario pro deep link no Windows/Linux) ---------
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -188,6 +243,7 @@ if (!app.requestSingleInstanceLock()) {
       app.setAsDefaultProtocolClient(PROTOCOL);
     }
 
+    initDisplayMedia();
     loadSession();
     createWindow();
 
@@ -260,6 +316,13 @@ ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('api:me', () => apiFetch('/api/me'));
 ipcMain.handle('api:messages', () => apiFetch('/api/messages'));
 ipcMain.handle('api:presence', () => apiFetch('/api/presence'));
+ipcMain.handle('api:heartbeat', (_e, ativo: unknown) =>
+  apiFetch('/api/me/heartbeat', {
+    method: 'POST',
+    body: JSON.stringify({ ativo: ativo === true }),
+  }));
+ipcMain.handle('api:set-status', (_e, status: unknown) =>
+  apiFetch('/api/me/status', { method: 'PATCH', body: JSON.stringify({ status }) }));
 ipcMain.handle('api:send-message', (_e, body: string) =>
   apiFetch('/api/messages', { method: 'POST', body: JSON.stringify({ body }) }));
 ipcMain.handle('api:room-token', (_e, channelId: string) =>
@@ -294,8 +357,20 @@ const JANELAS_IGNORADAS = [
 ipcMain.handle('screen:sources', async () => {
   const sources = await desktopCapturer.getSources({
     types: ['screen', 'window'],
-    thumbnailSize: { width: 320, height: 180 },
+    // No Wayland o thumbnail sai do portal, nao da captura direta: pedir
+    // miniatura grande faz a chamada demorar (ou falhar) sem devolver nada
+    // util, porque o portal so entrega frame depois do stream aberto.
+    thumbnailSize: process.platform === 'linux'
+      ? { width: 0, height: 0 }
+      : { width: 320, height: 180 },
   });
+
+  // Diagnostico: o que o Chromium devolveu ANTES de qualquer filtro nosso.
+  // No Linux e a unica janela pra enxergar o que o portal entregou.
+  console.log(
+    '[screen:sources] cru =',
+    JSON.stringify(sources.map((s) => ({ id: s.id, name: s.name }))),
+  );
 
   // As janelas do proprio app saem pelo titulo real, perguntado ao Electron -
   // assim renomear o app nao deixa uma string velha pra tras aqui.
@@ -305,8 +380,14 @@ ipcMain.handle('screen:sources', async () => {
       .filter(Boolean),
   );
 
-  return sources
+  // A lista de ignorados e toda de janela do Windows, e o teste de tela por
+  // prefixo 'screen:' e do caminho X11. No Wayland o portal ja e o filtro -
+  // aplicar os nossos aqui so tem como tirar coisa demais.
+  const linux = process.platform === 'linux';
+
+  const lista = sources
     .filter((s) => {
+      if (linux) return true;
       if (s.id.startsWith('screen:')) return true; // telas passam sempre
       if (!s.name.trim()) return false;
       if (minhas.has(s.name)) return false;
@@ -314,10 +395,13 @@ ipcMain.handle('screen:sources', async () => {
     })
     .map((s) => ({
       id: s.id,
-      name: s.name,
-      thumbnail: s.thumbnail.toDataURL(),
+      name: s.name || 'Tela',
+      thumbnail: s.thumbnail.isEmpty() ? null : s.thumbnail.toDataURL(),
       isScreen: s.id.startsWith('screen:'),
     }));
+
+  console.log('[screen:sources] devolvido =', lista.length);
+  return lista;
 });
 
 // --- IPC: configuracoes --------------------------------------------------

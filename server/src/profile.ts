@@ -10,6 +10,7 @@ import {
 
 export const MAX_BIO_LENGTH = 300;
 export const MAX_STATUS_LENGTH = 60;
+export const MAX_NAME_LENGTH = 32;
 
 /** Teto do arquivo já decodificado. O cliente redimensiona antes de mandar;
  *  isto é a rede de segurança contra quem falar com a API na mão. */
@@ -115,13 +116,20 @@ export function registerProfileRoutes(app: FastifyInstance): void {
       return reply.code(429).send({ error: 'devagar aí' });
     }
 
-    const { bio, statusText } = (req.body ?? {}) as {
+    const { name, bio, statusText } = (req.body ?? {}) as {
+      name?: unknown;
       bio?: unknown;
       statusText?: unknown;
     };
 
-    const patch: { bio?: string; statusText?: string } = {};
+    const patch: { name?: string; bio?: string; statusText?: string } = {};
 
+    if (name !== undefined) {
+      if (typeof name !== 'string') return reply.code(400).send({ error: 'apelido inválido' });
+      const limpo = name.replace(/\s+/g, ' ').trim().slice(0, MAX_NAME_LENGTH);
+      if (!limpo) return reply.code(400).send({ error: 'apelido não pode ficar vazio' });
+      patch.name = limpo;
+    }
     if (bio !== undefined) {
       if (typeof bio !== 'string') return reply.code(400).send({ error: 'bio inválida' });
       patch.bio = bio.trim().slice(0, MAX_BIO_LENGTH);

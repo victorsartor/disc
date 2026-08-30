@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Channel, Me, Presence } from '../types';
+import type {
+  Channel, Me, Presence, StatusEfetivo, StatusEscolhido, UserPresence,
+} from '../types';
 import type { Peer } from '../lib/useRoom';
 import {
   IconSpeaker, IconMic, IconMicOff, IconHeadphones,
@@ -29,12 +31,33 @@ interface Row {
   live: boolean;
 }
 
+/** Rótulo e cor de cada status, num lugar só. */
+const STATUS = {
+  disponivel: { label: 'Disponível', cor: 'var(--ok)' },
+  ausente: { label: 'Ausente', cor: 'var(--live)' },
+  invisivel: { label: 'Invisível', cor: 'var(--lavender)' },
+  offline: { label: 'Off-line', cor: 'var(--lavender)' },
+} as const;
+
+/** O que o seletor oferece, com a explicação de cada um. */
+const ESCOLHAS: { id: StatusEscolhido; dica: string }[] = [
+  { id: 'disponivel', dica: 'Vira "Ausente" sozinho depois de 10 min de microfone mudo' },
+  { id: 'ausente', dica: 'Fica ausente mesmo com o microfone aberto' },
+  { id: 'invisivel', dica: 'Você aparece off-line pros outros' },
+];
+
 interface Props {
   me: Me;
   channels: Channel[];
   activeChannel: string | null;
   peers: Peer[];
   presence: Presence;
+  /** Todo mundo do servidor, pra lista de quem está online fora de call. */
+  users: UserPresence[];
+  /** O seu status como os outros veem — pode divergir do escolhido. */
+  status: StatusEfetivo;
+  statusEscolhido: StatusEscolhido;
+  onStatusChange: (status: StatusEscolhido) => void;
   connecting: boolean;
   micOn: boolean;
   deafened: boolean;
@@ -52,14 +75,17 @@ interface Props {
 }
 
 export function Sidebar({
-  me, channels, activeChannel, peers, presence, connecting, micOn, deafened,
+  me, channels, activeChannel, peers, presence, users, status, statusEscolhido,
+  onStatusChange, connecting, micOn, deafened,
   pttMode, pttDown, onJoin, onLeave, onToggleMic, onToggleDeafen,
   onVolumeChange, onOpenSettings, onOpenProfile, onOpenUser,
 }: Props) {
-  const status = connecting
+  // Este é o estado da CONEXÃO com o canal, não o status de presença. São
+  // coisas diferentes: dá pra estar "Disponível" sem estar em canal nenhum.
+  const conexao = connecting
     ? 'conectando...'
     : !activeChannel
-      ? 'offline'
+      ? null
       : pttMode
         ? (pttDown ? 'falando' : 'aperte para falar')
         : 'conectado';
@@ -112,6 +138,18 @@ export function Sidebar({
             </div>
           );
         })}
+
+        <OnlineList
+          users={users}
+          emCall={new Set(
+            channels.flatMap((ch) =>
+              (activeChannel === ch.id ? peers : (presence[ch.id] ?? []))
+                .map((m) => m.identity),
+            ),
+          )}
+          meId={me.id}
+          onOpenUser={onOpenUser}
+        />
       </div>
 
       {/* Nome numa linha e controles na outra: com quatro botoes numa coluna
@@ -122,14 +160,22 @@ export function Sidebar({
           onClick={onOpenProfile}
           title="Seu perfil"
         >
-          <Avatar url={me.avatarUrl} name={me.name} size={32} />
+          <span className="userbar__foto">
+            <Avatar url={me.avatarUrl} name={me.name} size={32} />
+            <span
+              className="bolinha bolinha--borda"
+              style={{ background: STATUS[status].cor }}
+            />
+          </span>
           <div className="userbar__info">
             <div className="userbar__name">{me.name}</div>
             <div className={`userbar__status${activeChannel ? ' userbar__status--connected' : ''}`}>
-              {status}
+              {conexao ?? STATUS[status].label}
             </div>
           </div>
         </button>
+
+        <StatusPicker escolhido={statusEscolhido} onChange={onStatusChange} />
 
         <div className="userbar__actions">
           <button
@@ -162,6 +208,125 @@ export function Sidebar({
         </div>
       </div>
     </aside>
+  );
+}
+
+/**
+ * O seletor de status.
+ *
+ * Mostra a ESCOLHA, não o efetivo: se você escolheu "Disponível" e o relógio
+ * te deixou ausente, o certo é o seletor continuar marcando Disponível —
+ * senão parece que alguém mexeu na sua opção. Quem mostra o efetivo é a
+ * linha do nome, logo acima.
+ */
+function StatusPicker({
+  escolhido, onChange,
+}: {
+  escolhido: StatusEscolhido;
+  onChange: (s: StatusEscolhido) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="statuspick" ref={ref}>
+      <button
+        className="statuspick__btn"
+        onClick={() => setOpen((v) => !v)}
+        title="Mudar seu status"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <span className="bolinha" style={{ background: STATUS[escolhido].cor }} />
+      </button>
+
+      {open && (
+        <div className="statuspick__menu" role="menu">
+          {ESCOLHAS.map(({ id, dica }) => (
+            <button
+              key={id}
+              role="menuitemradio"
+              aria-checked={escolhido === id}
+              className={`statuspick__item${escolhido === id ? ' statuspick__item--ativo' : ''}`}
+              onClick={() => {
+                onChange(id);
+                setOpen(false);
+              }}
+            >
+              <span className="bolinha" style={{ background: STATUS[id].cor }} />
+              <span className="statuspick__texto">
+                <span className="statuspick__nome">{STATUS[id].label}</span>
+                <span className="statuspick__dica">{dica}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Quem está com o app aberto mas fora de call.
+ *
+ * Quem está em canal já aparece dentro dele, e repetir a mesma pessoa em
+ * dois lugares faria a coluna mentir sobre quanta gente tem online.
+ */
+function OnlineList({
+  users, emCall, meId, onOpenUser,
+}: {
+  users: UserPresence[];
+  emCall: Set<string>;
+  meId: string;
+  onOpenUser: (identity: string) => void;
+}) {
+  const fora = users.filter(
+    (u) => u.status !== 'offline' && !emCall.has(u.identity) && u.identity !== meId,
+  );
+  if (fora.length === 0) return null;
+
+  return (
+    <>
+      <div className="sidebar__label">Online</div>
+      {fora.map((u) => (
+        <div
+          key={u.identity}
+          className="member member--away"
+          role="button"
+          tabIndex={0}
+          onClick={() => onOpenUser(u.identity)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onOpenUser(u.identity);
+            }
+          }}
+        >
+          <span className="member__foto">
+            <Avatar url={u.avatarUrl} name={u.name} size={24} className="member__avatar" />
+            <span
+              className="bolinha bolinha--borda"
+              style={{ background: STATUS[u.status].cor }}
+            />
+          </span>
+          <span className="member__name">{u.name}</span>
+        </div>
+      ))}
+    </>
   );
 }
 

@@ -1,4 +1,4 @@
-/* ── Os quatro temas ──────────────────────────────────────────────────────
+/* ── Os oito temas ────────────────────────────────────────────────────────
    O theme.css inteiro pinta por variável, então trocar de tema é trocar
    estas declarações — não há regra de componente aqui embaixo.
 
@@ -124,4 +124,126 @@
   --hover: rgba(60, 90, 120, 0.06);
 
   color-scheme: light;
+}
+
+/* ── Tabaco — Dark Walnut ─────────────────────────────────────────────────
+   A primeira das duas paletas terrosas. Os marrons da paleta são fortes
+   demais pra virar fundo: viram os NÍVEIS acima do fundo, e o fundo desce
+   pra um marrom quase preto. O verde-sálvia entra como destaque justamente
+   por ser a única cor fria aqui — sem ele o tema inteiro vira uma mancha só.
+   ──────────────────────────────────────────────────────────────────────── */
+:root[data-theme="tabaco"] {
+  --ink: #1a1008;
+  --prussian: #33200e;
+  --dusk: #7f4f24;
+  --lavender: #b6ad90;
+  --alabaster: #f0e6d6;
+
+  --accent: #c2c5aa;
+  --accent-dim: rgba(194, 197, 170, 0.14);
+  --accent-glow: rgba(194, 197, 170, 0.3);
+  --danger: #e5584d;
+  --live: #c98a3c;
+
+  --level-0: #150d06;
+  --level-1: #241609;
+  --level-2: #33200e;
+  --level-3: #452b13;
+  --glass: rgba(127, 79, 36, 0.22);
+
+  --line: rgba(166, 138, 100, 0.3);
+  --line-strong: rgba(166, 138, 100, 0.55);
+  --hover: rgba(182, 173, 144, 0.07);
+
+  color-scheme: dark;
+}
+
+/* ── Musgo — Charcoal Brown ───────────────────────────────────────────────
+   A metade fria da mesma paleta. Aqui o destaque inverte: o fundo já é
+   esverdeado, então quem precisa saltar é o camelo quente.
+   ──────────────────────────────────────────────────────────────────────── */
+:root[data-theme="musgo"] {
+  --ink: #1c2116;
+  --prussian: #333d29;
+  --dusk: #656d4a;
+  --lavender: #a4ac86;
+  --alabaster: #e8ece0;
+
+  --accent: #c7a877;
+  --accent-dim: rgba(199, 168, 119, 0.15);
+  --accent-glow: rgba(199, 168, 119, 0.32);
+  --danger: #e5584d;
+  --live: #d19a3f;
+
+  --level-0: #14180f;
+  --level-1: #1c2116;
+  --level-2: #333d29;
+  --level-3: #414833;
+  --glass: rgba(101, 109, 74, 0.24);
+
+  --line: rgba(164, 172, 134, 0.28);
+  --line-strong: rgba(164, 172, 134, 0.5);
+  --hover: rgba(194, 197, 170, 0.07);
+
+  color-scheme: dark;
+}
+
+/* ── Violeta — Royal Violet ───────────────────────────────────────────────
+   O meio da paleta roxa: os níveis andam pelo miolo dela (#3c096c em cima
+   de #240046), e sobra o topo claro pra texto e destaque.
+   ──────────────────────────────────────────────────────────────────────── */
+:root[data-theme="violeta"] {
+  --ink: #1c0938;
+  --prussian: #3c096c;
+  --dusk: #7b2cbf;
+  --lavender: #c3a5e8;
+  --alabaster: #f4ecfd;
+
+  --accent: #e0aaff;
+  --accent-dim: rgba(224, 170, 255, 0.15);
+  --accent-glow: rgba(224, 170, 255, 0.34);
+  --danger: #ff6b78;
+  --live: #f5b95c;
+
+  --level-0: #1a0733;
+  --level-1: #210d40;
+  --level-2: #3c096c;
+  --level-3: #4e1585;
+  --glass: rgba(123, 44, 191, 0.26);
+
+  --line: rgba(157, 78, 221, 0.42);
+  --line-strong: rgba(157, 78, 221, 0.7);
+  --hover: rgba(224, 170, 255, 0.09);
+
+  color-scheme: dark;
+}
+
+/* ── Ametista — Dark Amethyst ─────────────────────────────────────────────
+   O fundo da mesma paleta, e o mais severo dos oito: #10002b é quase preto
+   com roxo dentro. É o Abissal do lado roxo.
+   ──────────────────────────────────────────────────────────────────────── */
+:root[data-theme="ametista"] {
+  --ink: #10002b;
+  --prussian: #240046;
+  --dusk: #5a189a;
+  --lavender: #a78bca;
+  --alabaster: #ede4f7;
+
+  --accent: #c77dff;
+  --accent-dim: rgba(199, 125, 255, 0.15);
+  --accent-glow: rgba(199, 125, 255, 0.32);
+  --danger: #ff5c6c;
+  --live: #f0a83d;
+
+  --level-0: #0b0020;
+  --level-1: #10002b;
+  --level-2: #240046;
+  --level-3: #3c096c;
+  --glass: rgba(90, 24, 154, 0.25);
+
+  --line: rgba(123, 44, 191, 0.4);
+  --line-strong: rgba(123, 44, 191, 0.68);
+  --hover: rgba(199, 125, 255, 0.08);
+
+  color-scheme: dark;
 }

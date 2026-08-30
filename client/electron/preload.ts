@@ -30,6 +30,8 @@ const api = {
   me: () => ipcRenderer.invoke('api:me'),
   messages: () => ipcRenderer.invoke('api:messages'),
   presence: () => ipcRenderer.invoke('api:presence'),
+  heartbeat: (ativo: boolean) => ipcRenderer.invoke('api:heartbeat', ativo),
+  setStatus: (status: string) => ipcRenderer.invoke('api:set-status', status),
   sendMessage: (body: string) => ipcRenderer.invoke('api:send-message', body),
   roomToken: (channelId: string) => ipcRenderer.invoke('api:room-token', channelId),
   whipConfig: (channelId: string) => ipcRenderer.invoke('api:whip-config', channelId),
@@ -46,6 +48,9 @@ const api = {
     ipcRenderer.invoke('window:titlebar', color, symbolColor),
 
   screenSources: () => ipcRenderer.invoke('screen:sources'),
+
+  /** No Wayland quem escolhe a tela e o portal do sistema, nao o nosso modal. */
+  platform: process.platform,
 
   copy: (text: string) => ipcRenderer.invoke('clipboard:write', text),
 

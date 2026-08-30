@@ -62,7 +62,12 @@ setInterval(() => {
   for (const [s, exp] of pendingStates) if (exp <= now) pendingStates.delete(s);
 }, 60_000).unref();
 
-function page(title: string, message: string, tone: 'ok' | 'erro'): string {
+function page(
+  title: string,
+  message: string,
+  tone: 'ok' | 'erro',
+  extra = '',
+): string {
   const accent = tone === 'ok' ? '#4cc9c0' : '#e5484d';
   return `<!doctype html><meta charset="utf-8">
 <title>${title}</title>
@@ -74,8 +79,11 @@ function page(title: string, message: string, tone: 'ok' | 'erro'): string {
         padding:2.5rem 3rem;text-align:center;max-width:26rem}
   h1{margin:0 0 .5rem;font-size:1.25rem;color:${accent}}
   p{margin:0;color:#778da9;font-size:.95rem}
+  a.botao{display:inline-block;margin-top:1.5rem;padding:.6rem 1.4rem;
+          border-radius:9px;background:#4cc9c0;color:#0d1b2a;
+          font-weight:600;text-decoration:none}
 </style>
-<div class="card"><h1>${title}</h1><p>${message}</p></div>`;
+<div class="card"><h1>${title}</h1><p>${message}</p>${extra}</div>`;
 }
 
 export function registerAuthRoutes(app: FastifyInstance): void {
@@ -161,9 +169,15 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     const session = await issueSession(user.id);
     const deepLink = `${config.appProtocol}://auth?token=${encodeURIComponent(session)}`;
 
+    // O redirecionamento automático é o caminho normal. O botão existe porque
+    // no Linux o navegador só oferece abrir um esquema desconhecido quando o
+    // clique parte da pessoa: sem ele, o disc:// some em silêncio e o app fica
+    // preso na tela de login mesmo com o Google já tendo aceitado.
+    const botao = `<a class="botao" href="${deepLink}">Abrir a Disneia</a>`;
+
     return reply.type('text/html').send(`<!doctype html><meta charset="utf-8">
 <meta http-equiv="refresh" content="0;url=${deepLink}">
-${page('Tudo certo', 'Pode voltar pro app — já pode fechar esta aba.', 'ok')}
+${page('Tudo certo', 'Pode voltar pro app — já pode fechar esta aba.', 'ok', botao)}
 <script>location.href=${JSON.stringify(deepLink)}</script>`);
   });
 }

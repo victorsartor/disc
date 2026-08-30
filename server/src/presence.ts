@@ -1,5 +1,57 @@
 import { RoomServiceClient, TrackSource, type ParticipantInfo } from 'livekit-server-sdk';
 import { config, CHANNELS } from './config.js';
+import { allUsers, type StatusEfetivo, type User } from './db.js';
+
+/**
+ * Sem sinal de vida por este tempo, a pessoa é dada como offline.
+ *
+ * Precisa ser bem maior que o intervalo do batimento do cliente: uma
+ * requisição perdida não pode apagar alguém da lista. O cliente bate a cada
+ * 20s, então três batidas falhas seguidas ainda não derrubam ninguém.
+ */
+const OFFLINE_MS = 70_000;
+
+/**
+ * Mudo por 10 minutos vira ausente.
+ *
+ * O relógio conta MICROFONE DESLIGADO, não silêncio: quem está com o
+ * microfone aberto continua disponível mesmo passando meia hora sem falar —
+ * está ali, ouvindo. Quem mutou e esqueceu é que sai de cena.
+ */
+const AUSENTE_MS = 10 * 60_000;
+
+export interface UserPresence {
+  identity: string;
+  name: string;
+  avatarUrl: string | null;
+  status: StatusEfetivo;
+}
+
+/**
+ * O que os OUTROS veem — nunca a escolha crua.
+ *
+ * A ordem das perguntas é o que faz a regra: app fechado ganha de tudo, e
+ * quem escolheu se esconder vira offline sem passar pelo resto. Só quem se
+ * declarou disponível é que ainda pode cair pra ausente pelo relógio; quem
+ * marcou ausente na mão fica ausente mesmo falando.
+ */
+export function statusEfetivo(u: User, agora = Date.now()): StatusEfetivo {
+  if (!u.last_seen || agora - u.last_seen > OFFLINE_MS) return 'offline';
+  if (u.status === 'invisivel') return 'offline';
+  if (u.status === 'ausente') return 'ausente';
+  if (!u.last_active || agora - u.last_active > AUSENTE_MS) return 'ausente';
+  return 'disponivel';
+}
+
+export function usersPresence(): UserPresence[] {
+  const agora = Date.now();
+  return allUsers().map((u) => ({
+    identity: u.id,
+    name: u.name,
+    avatarUrl: u.avatar_url,
+    status: statusEfetivo(u, agora),
+  }));
+}
 
 /**
  * Quem está em cada canal de voz, para quem ainda NÃO entrou.

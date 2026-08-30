@@ -9,9 +9,29 @@ interface Props {
 export function ScreenPicker({ onPick, onClose }: Props) {
   const [sources, setSources] = useState<ScreenSource[]>([]);
   const [picked, setPicked] = useState<string | null>(null);
+  // 'buscando' e um estado de verdade, separado de "achou zero". Antes os
+  // dois mostravam o mesmo texto, entao lista vazia e erro na chamada ficavam
+  // indistinguiveis de "ainda carregando" — e a tela travava em silencio.
+  const [fase, setFase] = useState<'buscando' | 'pronto' | 'erro'>('buscando');
+  const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
-    void window.disc.screenSources().then(setSources);
+    let vivo = true;
+    window.disc
+      .screenSources()
+      .then((lista) => {
+        if (!vivo) return;
+        setSources(lista);
+        setFase('pronto');
+      })
+      .catch((err: unknown) => {
+        if (!vivo) return;
+        setErro((err as Error)?.message ?? 'falha desconhecida');
+        setFase('erro');
+      });
+    return () => {
+      vivo = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -26,8 +46,22 @@ export function ScreenPicker({ onPick, onClose }: Props) {
         <div className="modal__head">O que você quer compartilhar?</div>
 
         <div className="modal__grid">
-          {sources.length === 0 ? (
+          {fase === 'buscando' ? (
             <div className="empty">Procurando janelas...</div>
+          ) : fase === 'erro' ? (
+            <div className="empty">
+              Não consegui listar as telas.
+              <br />
+              <span style={{ fontSize: 12, opacity: 0.8 }}>{erro}</span>
+            </div>
+          ) : sources.length === 0 ? (
+            <div className="empty">
+              O sistema não devolveu nenhuma tela nem janela.
+              <br />
+              <span style={{ fontSize: 12, opacity: 0.8 }}>
+                No Linux isso costuma ser o portal de tela recusando o pedido.
+              </span>
+            </div>
           ) : (
             sources.map((s) => (
               <button
@@ -36,7 +70,9 @@ export function ScreenPicker({ onPick, onClose }: Props) {
                 onClick={() => setPicked(s.id)}
                 onDoubleClick={() => onPick(s.id)}
               >
-                <img src={s.thumbnail} alt="" />
+                {s.thumbnail
+                  ? <img src={s.thumbnail} alt="" />
+                  : <div className="source__sem-preview">{s.isScreen ? 'Tela' : 'Janela'}</div>}
                 <div className="source__name">{s.name}</div>
               </button>
             ))

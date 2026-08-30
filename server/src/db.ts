@@ -55,6 +55,16 @@ for (const [name, decl] of [
   // onde voltar depois que a pessoa subiu uma própria.
   ['google_avatar_url', 'TEXT'],
   ['avatar_custom', 'INTEGER NOT NULL DEFAULT 0'],
+  // Mesmo esquema do avatar_custom: sem isto, o próximo login pelo Google
+  // reescreveria o apelido escolhido de volta pro nome da conta Google.
+  ['name_custom', 'INTEGER NOT NULL DEFAULT 0'],
+  // Presença. `status` é a ESCOLHA da pessoa; o que os outros veem sai de
+  // combinar isso com os dois carimbos de tempo (ver statusEfetivo).
+  ['status', "TEXT NOT NULL DEFAULT 'disponivel'"],
+  // last_seen: último sinal de vida do app aberto — sem isto, "offline".
+  // last_active: última vez que a pessoa FALOU. É o relógio dos 5 minutos.
+  ['last_seen', 'INTEGER'],
+  ['last_active', 'INTEGER'],
 ] as const) {
   if (!userColumns.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${decl}`);
 }
@@ -71,7 +81,19 @@ export interface User {
   google_avatar_url: string | null;
   /** 1 depois que a pessoa sobe a própria foto — ver upsertUser. */
   avatar_custom: number;
+  /** 1 depois que a pessoa escolhe um apelido — ver upsertUser. */
+  name_custom: number;
+  /** O que a pessoa escolheu no seletor, não o que os outros veem. */
+  status: StatusEscolhido;
+  last_seen: number | null;
+  last_active: number | null;
 }
+
+/** O que a pessoa pode escolher. 'invisivel' aparece como offline pros outros. */
+export type StatusEscolhido = 'disponivel' | 'ausente' | 'invisivel';
+
+/** O que os outros veem. Nunca 'invisivel': quem se esconde vira offline. */
+export type StatusEfetivo = 'disponivel' | 'ausente' | 'offline';
 
 export interface ImageRow {
   mime: string;
@@ -99,7 +121,7 @@ const stmts = {
   // perderia a que escolheu — uma vez por reinício do app.
   updateFromGoogle: db.prepare(`
     UPDATE users
-       SET name = ?,
+       SET name = CASE WHEN name_custom = 1 THEN name ELSE ? END,
            google_avatar_url = ?,
            avatar_url = CASE WHEN avatar_custom = 1 THEN avatar_url ELSE ? END
      WHERE id = ?
@@ -110,6 +132,11 @@ const stmts = {
   updateBanner: db.prepare('UPDATE users SET banner_url = ? WHERE id = ?'),
   updateBio: db.prepare('UPDATE users SET bio = ? WHERE id = ?'),
   updateStatusText: db.prepare('UPDATE users SET status_text = ? WHERE id = ?'),
+  updateName: db.prepare('UPDATE users SET name = ?, name_custom = 1 WHERE id = ?'),
+  updateStatus: db.prepare('UPDATE users SET status = ? WHERE id = ?'),
+  touchSeen: db.prepare('UPDATE users SET last_seen = ? WHERE id = ?'),
+  touchAtivo: db.prepare('UPDATE users SET last_seen = ?, last_active = ? WHERE id = ?'),
+  todos: db.prepare('SELECT * FROM users'),
   insertImage: db.prepare(
     'INSERT INTO images (id, mime, bytes, created_at) VALUES (?, ?, ?, ?)',
   ),
@@ -164,8 +191,9 @@ export function setBanner(userId: string, url: string | null): User {
 
 export function patchProfile(
   userId: string,
-  patch: { bio?: string; statusText?: string },
+  patch: { name?: string; bio?: string; statusText?: string },
 ): User {
+  if (patch.name !== undefined) stmts.updateName.run(patch.name, userId);
   if (patch.bio !== undefined) stmts.updateBio.run(patch.bio, userId);
   if (patch.statusText !== undefined) stmts.updateStatusText.run(patch.statusText, userId);
   return findUserById(userId)!;
@@ -190,4 +218,28 @@ export function saveMessage(userId: string, body: string): number {
 
 export function recentMessages(limit = 100): MessageRow[] {
   return (stmts.recentMessages.all(limit) as MessageRow[]).reverse();
+}
+
+/**
+ * Presença — os dois relógios.
+ *
+ * `last_seen` é o app aberto: o cliente bate de tempos em tempos, e parar de
+ * bater é o que vira offline. `last_active` é a última vez que a pessoa
+ * estava com o MICROFONE ABERTO, e é ele que conta os 10 minutos de
+ * ausência. São separados porque quem está com o app aberto e mudo não é a
+ * mesma coisa que quem fechou.
+ */
+export function touchPresence(userId: string, ativo: boolean): void {
+  const agora = Date.now();
+  if (ativo) stmts.touchAtivo.run(agora, agora, userId);
+  else stmts.touchSeen.run(agora, userId);
+}
+
+export function setStatus(userId: string, status: StatusEscolhido): User {
+  stmts.updateStatus.run(status, userId);
+  return findUserById(userId)!;
+}
+
+export function allUsers(): User[] {
+  return stmts.todos.all() as User[];
 }

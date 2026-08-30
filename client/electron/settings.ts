@@ -26,6 +26,8 @@ export interface Settings {
   volumes: Record<string, number>;
   /** identity -> volume do SOM DA TELA daquela pessoa (0 a 1) */
   screenVolumes: Record<string, number>;
+  /** Monitor do PipeWire de onde tirar o som da tela no Linux. */
+  screenAudioDeviceId: string | null;
   overlayEnabled: boolean;
   overlayX: number | null;
   overlayY: number | null;
@@ -47,6 +49,7 @@ const DEFAULTS: Settings = {
   autoGainControl: true,
   volumes: {},
   screenVolumes: {},
+  screenAudioDeviceId: null,
   overlayEnabled: true,
   overlayX: null,
   overlayY: null,
@@ -92,6 +95,7 @@ const ALLOWED_KEYS = new Set<keyof Settings>([
   'voiceMode', 'pttKeycode', 'pttKeyLabel', 'micDeviceId',
   'speakerDeviceId', 'micSensitivity', 'noiseSuppression',
   'echoCancellation', 'autoGainControl', 'volumes', 'screenVolumes',
+  'screenAudioDeviceId',
   'overlayEnabled', 'overlayX', 'overlayY', 'theme',
 ]);
 

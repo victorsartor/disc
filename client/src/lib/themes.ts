@@ -30,6 +30,30 @@ export const THEMES = [
     hint: 'preto tinta',
     swatch: 'linear-gradient(145deg, #16283d, #060d15)',
   },
+  {
+    id: 'tabaco',
+    name: 'Tabaco',
+    hint: 'marrom terroso',
+    swatch: 'linear-gradient(145deg, #936639, #33200e)',
+  },
+  {
+    id: 'musgo',
+    name: 'Musgo',
+    hint: 'verde oliva',
+    swatch: 'linear-gradient(145deg, #656d4a, #1c2116)',
+  },
+  {
+    id: 'violeta',
+    name: 'Violeta',
+    hint: 'roxo vibrante',
+    swatch: 'linear-gradient(145deg, #9d4edd, #240046)',
+  },
+  {
+    id: 'ametista',
+    name: 'Ametista',
+    hint: 'roxo profundo',
+    swatch: 'linear-gradient(145deg, #7b2cbf, #10002b)',
+  },
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]['id'];

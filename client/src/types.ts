@@ -55,10 +55,25 @@ export interface PresenceMember {
 /** canalId -> quem está lá dentro */
 export type Presence = Record<string, PresenceMember[]>;
 
+/** O que a pessoa escolhe no seletor da sidebar. */
+export type StatusEscolhido = 'disponivel' | 'ausente' | 'invisivel';
+
+/** O que se vê dos outros. 'invisivel' nunca chega aqui: vira 'offline'. */
+export type StatusEfetivo = 'disponivel' | 'ausente' | 'offline';
+
+/** Todo mundo do servidor, esteja em call ou não. */
+export interface UserPresence {
+  identity: string;
+  name: string;
+  avatarUrl: string | null;
+  status: StatusEfetivo;
+}
+
 export interface ScreenSource {
   id: string;
   name: string;
-  thumbnail: string;
+  /** null quando o sistema nao entrega miniatura — o caso do Wayland. */
+  thumbnail: string | null;
   isScreen: boolean;
 }
 
@@ -94,8 +109,16 @@ export interface Settings {
   echoCancellation: boolean;
   autoGainControl: boolean;
   volumes: Record<string, number>;
-  /** identity -> volume do som da tela daquela pessoa (0 a 1). */
+  /** identity -> volume do som da tela daquela pessoa (0 a 2). */
   screenVolumes: Record<string, number>;
+  /**
+   * Dispositivo de onde tirar o som ao compartilhar tela no Linux.
+   *
+   * Existe porque o Chromium nao captura som de sistema no Linux: la o jeito
+   * e gravar de um "monitor" do PipeWire, que aparece como se fosse
+   * microfone. null = compartilhar so o video.
+   */
+  screenAudioDeviceId: string | null;
   overlayEnabled: boolean;
   overlayX: number | null;
   overlayY: number | null;
@@ -136,20 +159,25 @@ export interface DiscApi {
   };
   me(): Promise<Me>;
   messages(): Promise<{ messages: Message[] }>;
-  presence(): Promise<{ channels: Presence }>;
+  presence(): Promise<{ channels: Presence; users: UserPresence[] }>;
+  /** Batimento do app aberto. `ativo` renova o relógio dos 10 minutos. */
+  heartbeat(ativo: boolean): Promise<{ status: StatusEfetivo }>;
+  setStatus(status: StatusEscolhido): Promise<{ status: StatusEscolhido }>;
   sendMessage(body: string): Promise<{ message: Message }>;
   roomToken(channelId: string): Promise<RoomTokenResponse>;
   whipConfig(channelId: string): Promise<WhipConfig>;
   profile: {
     /** Perfil de qualquer um, pela identity do LiveKit ou pelo id. */
     of(identity: string): Promise<{ user: UserProfile }>;
-    patch(patch: { bio?: string; statusText?: string }): Promise<{ user: UserProfile }>;
+    patch(patch: { name?: string; bio?: string; statusText?: string }): Promise<{ user: UserProfile }>;
     /** dataUrl null remove: a capa some, a foto volta pra do Google. */
     image(kind: 'avatar' | 'banner', dataUrl: string | null): Promise<{ user: UserProfile }>;
   };
   /** Cores dos botões de janela: a barra é do SO e não lê o CSS do tema. */
   titlebar(color: string, symbolColor: string): Promise<void>;
   screenSources(): Promise<ScreenSource[]>;
+  /** 'linux', 'win32', 'darwin' — decide quem desenha o seletor de tela. */
+  platform: string;
   copy(text: string): Promise<void>;
   settings: {
     get(): Promise<Settings>;

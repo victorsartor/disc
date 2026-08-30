@@ -168,6 +168,30 @@
   letter-spacing: -0.01em;
 }
 
+/* Mesma lógica do recado: só parece campo de texto quando recebe o cursor. */
+.profile__name--input {
+  display: block;
+  width: 100%;
+  text-align: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 3px 10px;
+  color: inherit;
+  font-family: inherit;
+}
+
+.profile__name--input:hover {
+  border-color: var(--line);
+}
+
+.profile__name--input:focus {
+  outline: none;
+  background: var(--level-0);
+  border-color: var(--dusk);
+  color: var(--alabaster);
+}
+
 /* O recado é campo de texto, mas só parece um quando recebe o cursor —
    antes disso tem que ler como a legenda que fica embaixo do nome. */
 .profile__status {

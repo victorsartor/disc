@@ -9,6 +9,7 @@ import { IconCamera, IconCheck, IconTrash } from './Icons';
 /** Espelha os limites de server/src/profile.ts. */
 const MAX_BIO = 300;
 const MAX_STATUS = 60;
+const MAX_NAME = 32;
 
 interface Props {
   me: Me;
@@ -28,6 +29,7 @@ interface Props {
  */
 export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [name, setName] = useState('');
   const [bio, setBio] = useState('');
   const [statusText, setStatusText] = useState('');
   const [saving, setSaving] = useState(false);
@@ -36,7 +38,9 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
 
   // Fica true quando o texto na tela deixa de ser o texto do servidor. É o
   // que decide se o botão Salvar tem o que salvar.
-  const sujo = Boolean(user) && (bio !== user!.bio || statusText !== user!.statusText);
+  const sujo = Boolean(user) && (
+    name !== user!.name || bio !== user!.bio || statusText !== user!.statusText
+  );
 
   useEffect(() => {
     let vivo = true;
@@ -45,6 +49,7 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
       .then(({ user }) => {
         if (!vivo) return;
         setUser(user);
+        setName(user.name);
         setBio(user.bio);
         setStatusText(user.statusText);
       })
@@ -63,6 +68,7 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
   /** Aplica o que voltou do servidor aqui e lá fora, de uma vez só. */
   const aplicar = (u: UserProfile) => {
     setUser(u);
+    setName(u.name);
     setBio(u.bio);
     setStatusText(u.statusText);
     onSaved(u);
@@ -105,7 +111,7 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
     setSaving(true);
     setErro(null);
     try {
-      const { user } = await window.disc.profile.patch({ bio, statusText });
+      const { user } = await window.disc.profile.patch({ name, bio, statusText });
       aplicar(user);
       onClose();
     } catch (err) {
@@ -128,7 +134,7 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
           <button
             className="btn btn--accent btn--sm"
             onClick={() => void salvar()}
-            disabled={!user || saving || !sujo}
+            disabled={!user || saving || !sujo || !name.trim()}
           >
             {saving ? 'Salvando...' : 'Salvar'}
           </button>
@@ -145,7 +151,13 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
           />
 
           <div className="profile__identity">
-            <h2 className="profile__name">{user?.name ?? me.name}</h2>
+            <input
+              className="profile__name profile__name--input"
+              value={name}
+              maxLength={MAX_NAME}
+              placeholder="Seu apelido"
+              onChange={(e) => setName(e.target.value)}
+            />
             <input
               className="profile__status"
               value={statusText}

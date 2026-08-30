@@ -3,6 +3,9 @@ import {
   Room,
   RoomEvent,
   Track,
+  // Classe, nao tipo: o instanceof la embaixo precisa dela em tempo de
+  // execucao pra separar audio de video sem cast.
+  RemoteAudioTrack,
   type RemoteTrack,
   type RemoteTrackPublication,
   type RemoteParticipant,
@@ -52,7 +55,15 @@ export interface AudioFeed {
    * que ele esta transmitindo.
    */
   kind: 'voice' | 'screen';
-  track: RemoteTrack;
+  track: RemoteAudioTrack;
+  /**
+   * Volume escolhido pra esta faixa (0 a 2), ja vindo do settings.json.
+   *
+   * Viaja junto com a faixa porque quem anexa o <audio> e quem precisa
+   * reaplicar o ganho, e ele so descobre o valor certo por aqui. Ver o
+   * segundo efeito do AudioSink, em components/RoomAudio.tsx.
+   */
+  volume: number;
 }
 
 /**
@@ -73,6 +84,85 @@ const SCREEN_PRESET = {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+/**
+ * Quantas transmissoes da pra assistir ao mesmo tempo.
+ *
+ * O limite e de banda, nao de tela: cada uma pode chegar a 20 Mbps, e a
+ * terceira e a que estoura a internet de quem esta assistindo - inclusive
+ * derrubando a voz junto, que e o que menos pode cair.
+ */
+export const MAX_ASSISTINDO = 2;
+
+/**
+ * Som do sistema no Linux, por um monitor do PipeWire.
+ *
+ * O Chromium so captura som de sistema no Windows: no Linux nao existe
+ * loopback nenhum atras do getDisplayMedia. O que existe e o "monitor" que o
+ * PipeWire publica de cada saida de audio - ele aparece na lista de
+ * ENTRADAS, como se fosse um microfone, e gravar dele e gravar o que esta
+ * saindo pela caixa.
+ *
+ * Os tres tratamentos saem desligados de proposito. Eles existem pra voz
+ * humana: supressao de ruido come trilha de jogo, cancelamento de eco
+ * subtrai o que ja esta tocando (que aqui e justamente o sinal que
+ * queremos), e ganho automatico faz a musica respirar junto com os tiros.
+ */
+async function somDoSistema(deviceId: string | null): Promise<MediaStreamTrack | null> {
+  if (!deviceId) return null;
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: { exact: deviceId },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
+    return s.getAudioTracks()[0] ?? null;
+  } catch (err) {
+    // Monitor que sumiu (fone desconectado, saida trocada). Melhor
+    // compartilhar sem som do que nao compartilhar.
+    console.warn('nao consegui abrir o som do sistema', err);
+    return null;
+  }
+}
+
+/**
+ * Devolve os volumes escolhidos pra uma pessoa.
+ *
+ * O setVolume do LiveKit guarda o valor num mapa mesmo quando a faixa ainda
+ * nao existe, e o aplica sozinho na hora em que ela chega. E por isso que dá
+ * pra chamar isto no momento em que a pessoa entra, muito antes de ela
+ * comecar a compartilhar tela.
+ *
+ * Volume 1 nao entra no mapa de proposito: e o padrao, e deixar o mapa vazio
+ * e o mesmo resultado com menos estado.
+ */
+function aplicarVolumesSalvos(p: RemoteParticipant, cfg: Settings | null): void {
+  const vol = cfg?.volumes[p.identity];
+  if (vol !== undefined && vol !== 1) p.setVolume(vol, Track.Source.Microphone);
+
+  const svol = cfg?.screenVolumes[p.identity];
+  if (svol !== undefined && svol !== 1) {
+    p.setVolume(svol, Track.Source.ScreenShareAudio);
+  }
+}
+
+/**
+ * Volume salvo pra uma pessoa, no mapa da trilha certa.
+ *
+ * 1 e o padrao de quem nunca foi mexido - e tambem o que sai pra quem mexeu
+ * e voltou pro cheio, ja que aplicarVolumesSalvos nao guarda o 1.
+ */
+function volumeSalvo(
+  cfg: Settings | null,
+  identity: string,
+  kind: 'voice' | 'screen',
+): number {
+  const mapa = kind === 'screen' ? cfg?.screenVolumes : cfg?.volumes;
+  return mapa?.[identity] ?? 1;
+}
+
 function readAvatar(p: Participant): string | null {
   try {
     return p.metadata ? (JSON.parse(p.metadata).avatarUrl ?? null) : null;
@@ -89,7 +179,6 @@ export function useRoom(onChatMessage: (m: Message) => void) {
   // Refs porque os handlers de evento da sala capturam o valor do momento
   // em que a sala foi criada e ficariam com estado velho.
   const deafenedRef = useRef(false);
-  const micBeforeDeafenRef = useRef(true);
   /** O microfone com portao de ruido. null = caiu no caminho antigo. */
   const micRef = useRef<Mic | null>(null);
   /** identity -> ensurdecido, do que cada um anunciou. */
@@ -107,7 +196,22 @@ export function useRoom(onChatMessage: (m: Message) => void) {
   const [pttDown, setPttDown] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [sharing, setSharing] = useState(false);
+  /** A sua propria tela, so pra você conferir o que esta mandando. */
+  const [localScreen, setLocalScreen] = useState<MediaStreamTrack | null>(null);
+  /**
+   * Quais transmissoes voce escolheu assistir, no maximo MAX_ASSISTINDO.
+   *
+   * Nao e so enfeite de tela: quem nao esta nesta lista tem a assinatura
+   * cortada no SFU, entao os quadros nem descem pela rede. Assistir tres
+   * telas em 20 Mbps cada e o que derruba a call de quem tem internet
+   * comum.
+   */
+  const [assistindo, setAssistindo] = useState<string[]>([]);
+  const assistindoRef = useRef<string[]>([]);
+  assistindoRef.current = assistindo;
   const [error, setError] = useState<string | null>(null);
+  /** Ida e volta ate o SFU, em ms. null = sem call ou ICE ainda assentando. */
+  const [ping, setPing] = useState<number | null>(null);
 
   // --- Configuracoes -----------------------------------------------------
   useEffect(() => {
@@ -286,20 +390,17 @@ export function useRoom(onChatMessage: (m: Message) => void) {
             autoGainControl: true,
           },
           audioOutput: s?.speakerDeviceId ? { deviceId: s.speakerDeviceId } : undefined,
+          // Sem isto o setVolume do LiveKit escreve em element.volume, que a
+          // especificacao trava em 0..1 - passar de 1 lanca IndexSizeError e
+          // o volume nem se move. Ligando a mixagem por Web Audio o ganho
+          // passa por um GainNode, que amplifica acima de 100% de verdade.
+          // E o que sustenta os 200% da voz e do som da tela.
+          webAudioMix: true,
         });
 
         room
           .on(RoomEvent.ParticipantConnected, (p: RemoteParticipant) => {
-            // Volumes salvos daquela pessoa voltam a valer assim que ela entra.
-            // Sao dois, um por trilha: a voz dela e o som da tela dela.
-            const vol = settingsRef.current?.volumes[p.identity];
-            if (vol !== undefined && vol !== 1) {
-              p.setVolume(vol, Track.Source.Microphone);
-            }
-            const svol = settingsRef.current?.screenVolumes[p.identity];
-            if (svol !== undefined && svol !== 1) {
-              p.setVolume(svol, Track.Source.ScreenShareAudio);
-            }
+            aplicarVolumesSalvos(p, settingsRef.current);
             // Quem entra durante o ensurdecido tambem precisa vir mudo,
             // senao a proxima pessoa a chegar fura o silencio. So o microfone:
             // o som da tela nao e afetado por ensurdecer.
@@ -361,12 +462,18 @@ export function useRoom(onChatMessage: (m: Message) => void) {
               // Microfone E audio de tela caem aqui: os dois sao kind 'audio'
               // e os dois precisam ser anexados pra sair som. O kind separa
               // quem responde a ensurdecer e a qual controle de volume.
-              if (track.kind === 'audio') {
+              if (track instanceof RemoteAudioTrack) {
                 const kind =
                   pub.source === Track.Source.ScreenShareAudio ? 'screen' : 'voice';
                 setAudios((prev) => [
                   ...prev.filter((a) => a.sid !== pub.trackSid),
-                  { sid: pub.trackSid, identity: participant.identity, kind, track },
+                  {
+                    sid: pub.trackSid,
+                    identity: participant.identity,
+                    kind,
+                    track,
+                    volume: volumeSalvo(settingsRef.current, participant.identity, kind),
+                  },
                 ]);
               }
 
@@ -401,6 +508,14 @@ export function useRoom(onChatMessage: (m: Message) => void) {
 
         await room.connect(url, token);
 
+        // Volumes salvos de quem JA ESTAVA na sala.
+        //
+        // O ParticipantConnected so dispara pra quem chega depois de voce, e
+        // esses aqui ja estavam. Sem este laco, o LiveKit nunca ouvia falar
+        // do volume escolhido pra eles: a barrinha marcava 0 e o som saia
+        // inteiro na hora em que a pessoa comecava a compartilhar.
+        room.remoteParticipants.forEach((p) => aplicarVolumesSalvos(p, settingsRef.current));
+
         // Entrar no canal e um clique, entao o gesto do usuario ainda vale
         // aqui - que e a condicao pro Chromium liberar o autoplay do audio.
         await room.startAudio().catch(() => {
@@ -433,13 +548,17 @@ export function useRoom(onChatMessage: (m: Message) => void) {
           await room.localParticipant.setMicrophoneEnabled(true);
         }
 
-        // Em PTT o microfone comeca fechado e so abre com a tecla presa.
-        const startMuted = settingsRef.current?.voiceMode === 'ptt';
-        await room.localParticipant.setMicrophoneEnabled(!startMuted);
+        // Entra sempre fechado, e o efeito de microfone logo abaixo abre se
+        // for o caso. Ele conhece as tres coisas que decidem isso (mudo,
+        // ensurdecido, tecla do PTT) e roda assim que o canal muda; abrir
+        // aqui seria um palpite que poderia deixar o microfone no ar por um
+        // instante contra a vontade de quem entrou mudo.
+        await room.localParticipant.setMicrophoneEnabled(false);
 
         roomRef.current = room;
         setChannelId(target);
-        setMicWanted(true);
+        // O mudo NAO se desfaz ao trocar de canal: quem saiu calado entra
+        // calado. Só fechar o app zera, porque o estado só vive em memória.
         setPttDown(false);
         playConnect();
         // Quem ja estava na sala so fica sabendo do seu estado por aqui.
@@ -457,7 +576,16 @@ export function useRoom(onChatMessage: (m: Message) => void) {
 
   // --- Microfone ---------------------------------------------------------
   // Em PTT o mic so abre com a tecla presa. Em VAD segue o toggle manual.
-  const micLive = settings?.voiceMode === 'ptt' ? micWanted && pttDown : micWanted;
+  //
+  // Ensurdecido corta antes de tudo, e nao so quando se aperta o botao:
+  // falar com quem nao se ouve nao e uma combinacao que faz sentido, e como
+  // invariante ela nao pode depender da ORDEM em que os botoes foram
+  // clicados nem sobreviver a uma troca de canal.
+  const micLive = deafened
+    ? false
+    : settings?.voiceMode === 'ptt'
+      ? micWanted && pttDown
+      : micWanted;
 
   useEffect(() => {
     const room = roomRef.current;
@@ -465,7 +593,28 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     void room.localParticipant.setMicrophoneEnabled(micLive).then(syncPeers);
   }, [micLive, channelId, syncPeers]);
 
-  const toggleMic = useCallback(() => setMicWanted((v) => !v), []);
+  /**
+   * Botao do microfone.
+   *
+   * Abrir o microfone estando ensurdecido desfaz o ensurdecer junto. O botao
+   * precisa fazer o que promete: sem isso ele ficaria aceso sem que ninguem
+   * te ouvisse, porque a invariante acima manda calar.
+   */
+  const toggleMic = useCallback(() => {
+    if (deafenedRef.current) {
+      deafenedRef.current = false;
+      setDeafened(false);
+      roomRef.current?.remoteParticipants.forEach((p) =>
+        p.audioTrackPublications.forEach((pub) => {
+          if (pub.source === Track.Source.Microphone) pub.setEnabled(true);
+        }),
+      );
+      setMicWanted(true);
+      announceState();
+      return;
+    }
+    setMicWanted((v) => !v);
+  }, [announceState]);
 
   const toggleDeafen = useCallback(() => {
     const room = roomRef.current;
@@ -479,14 +628,10 @@ export function useRoom(onChatMessage: (m: Message) => void) {
         if (pub.source === Track.Source.Microphone) pub.setEnabled(!next);
       }),
     );
-    // Ensurdecer implica calar: caso classico de nao querer falar sozinho.
-    // Ao desensurdecer, o microfone volta como estava antes.
-    if (next) {
-      micBeforeDeafenRef.current = micWanted;
-      setMicWanted(false);
-    } else {
-      setMicWanted(micBeforeDeafenRef.current);
-    }
+    // Nao mexe no micWanted: quem cala e o micLive, que ja trata ensurdecido
+    // como microfone fechado. Assim o botao do microfone guarda sozinho o que
+    // a pessoa queria antes, e desensurdecer devolve exatamente aquilo — sem
+    // um segundo lugar guardando a mesma coisa e podendo discordar.
     deafenedRef.current = next;
     setDeafened(next);
     announceState();
@@ -509,9 +654,13 @@ export function useRoom(onChatMessage: (m: Message) => void) {
       settingsRef.current.volumes = { ...settingsRef.current.volumes, [identity]: volume };
     }
     setPeers((prev) => prev.map((p) => (p.identity === identity ? { ...p, volume } : p)));
+    // A faixa tambem: e dela que o <audio> tira o ganho ao reanexar.
+    setAudios((prev) =>
+      prev.map((a) => (a.identity === identity && a.kind === 'voice' ? { ...a, volume } : a)),
+    );
   }, []);
 
-  /** Volume do SOM DA TELA de uma pessoa (0 a 1), independente da voz dela. */
+  /** Volume do SOM DA TELA de uma pessoa (0 a 2), independente da voz dela. */
   const setScreenVolume = useCallback((identity: string, volume: number) => {
     roomRef.current
       ?.remoteParticipants.get(identity)
@@ -524,6 +673,9 @@ export function useRoom(onChatMessage: (m: Message) => void) {
       };
     }
     setScreenVolumes((prev) => ({ ...prev, [identity]: volume }));
+    setAudios((prev) =>
+      prev.map((a) => (a.identity === identity && a.kind === 'screen' ? { ...a, volume } : a)),
+    );
   }, []);
 
   // --- Compartilhamento de tela ------------------------------------------
@@ -541,12 +693,34 @@ export function useRoom(onChatMessage: (m: Message) => void) {
       }
     }
     setSharing(false);
+    setLocalScreen(null);
     syncPeers();
   }, [syncPeers]);
 
-  const startShare = useCallback(async (sourceId: string) => {
-    const room = roomRef.current;
-    if (!room) return;
+  /**
+   * Abre a captura de tela.
+   *
+   * `sourceId` null = deixa o sistema escolher. E o caminho do Wayland: la o
+   * id de uma fonte so vale enquanto a sessao do portal que o criou estiver
+   * viva, e ela nao sobrevive ao ida-e-volta pelo nosso modal - o PipeWire
+   * responde "target not found" na hora de abrir. Com getDisplayMedia quem
+   * lista e quem entrega e a mesma requisicao (ver initDisplayMedia no main),
+   * entao a sessao continua de pe.
+   */
+  const abrirCaptura = async (sourceId: string | null): Promise<MediaStream> => {
+    if (sourceId === null) {
+      // O audio NAO vem daqui. O Chromium so faz captura de som de sistema no
+      // Windows; no Linux, pedir audio aqui derruba o video junto. O som vem
+      // separado, de um monitor do PipeWire (ver somDoSistema).
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 60 },
+        audio: false,
+      });
+
+      const som = await somDoSistema(settingsRef.current?.screenAudioDeviceId ?? null);
+      if (som) stream.addTrack(som);
+      return stream;
+    }
 
     // Constraints do Electron. O audio de sistema so funciona no Windows;
     // no Linux ele falha, entao tentamos sem audio como fallback.
@@ -560,14 +734,32 @@ export function useRoom(onChatMessage: (m: Message) => void) {
       },
     } as unknown as MediaTrackConstraints;
 
-    let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
+      return await navigator.mediaDevices.getUserMedia({
         audio: { mandatory: { chromeMediaSource: 'desktop' } } as unknown as MediaTrackConstraints,
         video,
       });
     } catch {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+      return navigator.mediaDevices.getUserMedia({ audio: false, video });
+    }
+  };
+
+  const startShare = useCallback(async (sourceId: string | null) => {
+    const room = roomRef.current;
+    if (!room) return;
+
+    let stream: MediaStream;
+    try {
+      stream = await abrirCaptura(sourceId);
+    } catch (err) {
+      // Fechar o seletor do sistema no X e desistir, nao falhar: no Wayland
+      // esse dialogo e o caminho normal, entao cancelar nao pode acender
+      // mensagem de erro. Qualquer outra coisa a pessoa precisa ver.
+      const nome = (err as Error)?.name;
+      if (nome === 'NotAllowedError' || nome === 'AbortError') return;
+      console.error('captura de tela falhou', err);
+      setError('nao consegui compartilhar a tela');
+      return;
     }
 
     const [videoTrack] = stream.getVideoTracks();
@@ -590,7 +782,11 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     }
 
     // Cobre o "parar de compartilhar" nativo do SO
-    videoTrack.addEventListener('ended', () => void stopShare());
+    videoTrack.addEventListener("ended", () => void stopShare());
+    // A mesma faixa que esta indo pro ar alimenta o seu preview: assim o
+    // que voce confere e literalmente o que os outros recebem, e nao uma
+    // segunda captura que poderia divergir.
+    setLocalScreen(videoTrack);
     setSharing(true);
     syncPeers();
   }, [syncPeers, stopShare]);
@@ -616,6 +812,146 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     }
   }, []);
 
+  // --- Quais telas assistir ----------------------------------------------
+  /**
+   * Liga e desliga a assinatura de cada tela conforme a escolha.
+   *
+   * Roda tanto ao mexer na escolha quanto quando alguem comeca ou para de
+   * compartilhar: os dois mudam quem deveria estar assinado. O audio da tela
+   * acompanha o video de proposito - quem nao esta vendo o jogo tambem nao
+   * quer ouvi-lo.
+   */
+  const sincronizarAssinaturas = useCallback(() => {
+    const room = roomRef.current;
+    if (!room) return;
+    room.remoteParticipants.forEach((p) => {
+      const quer = assistindoRef.current.includes(p.identity);
+      for (const source of [Track.Source.ScreenShare, Track.Source.ScreenShareAudio]) {
+        const pub = p.getTrackPublication(source);
+        if (pub && pub.isSubscribed !== quer) pub.setSubscribed(quer);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    sincronizarAssinaturas();
+  }, [assistindo, peers, sincronizarAssinaturas]);
+
+  /**
+   * Entra ou sai de uma transmissao.
+   *
+   * Cheio, a mais antiga sai pra abrir vaga. Recusar o clique seria mais
+   * simples, mas obrigaria a fechar uma antes de abrir outra - e quem clica
+   * numa live quer ver aquela live.
+   */
+  const toggleAssistir = useCallback((identity: string) => {
+    setAssistindo((atual) => {
+      if (atual.includes(identity)) return atual.filter((i) => i !== identity);
+      return [...atual, identity].slice(-MAX_ASSISTINDO);
+    });
+  }, []);
+
+  /**
+   * Quem ja passou por aqui uma vez, tendo sido aberto sozinho ou nao.
+   *
+   * E o que separa "transmissao nova" de "transmissao que voce fechou".
+   * Sem esta memoria, o efeito abaixo reabria no ciclo seguinte tudo que
+   * tivesse vaga - fechar no olho durava um piscar e voltava sozinho.
+   */
+  const jaVistas = useRef(new Set<string>());
+
+  // Transmissao NOVA entra sozinha enquanto houver vaga: exigir um clique pra
+  // ver a unica live da sala seria cerimonia à toa. Uma que voce fechou fica
+  // fechada ate voce mandar abrir.
+  useEffect(() => {
+    const noAr = peers.filter((p) => p.isSharing && !p.isLocal).map((p) => p.identity);
+
+    // Quem parou de transmitir e esquecido: se voltar ao ar depois, e uma
+    // transmissao nova de novo, e merece abrir sozinha.
+    for (const id of [...jaVistas.current]) {
+      if (!noAr.includes(id)) jaVistas.current.delete(id);
+    }
+
+    const novas = noAr.filter((i) => !jaVistas.current.has(i));
+    novas.forEach((i) => jaVistas.current.add(i));
+
+    setAssistindo((atual) => {
+      const vivos = atual.filter((i) => noAr.includes(i));
+      const vagas = MAX_ASSISTINDO - vivos.length;
+      const entram = vagas > 0 ? novas.filter((i) => !vivos.includes(i)).slice(0, vagas) : [];
+      // Devolver o mesmo array quando nada muda evita um ciclo de renderizacao
+      // a cada sincronia de participantes.
+      if (entram.length === 0 && vivos.length === atual.length) return atual;
+      return [...vivos, ...entram];
+    });
+  }, [peers]);
+
+  // --- Ping --------------------------------------------------------------
+  /**
+   * Mede o tempo de ida e volta ate o servidor de voz, a cada 2 segundos.
+   *
+   * Cada pessoa so consegue medir o PROPRIO caminho: o RTT sai do par de
+   * candidatos ICE da conexao desta maquina com o SFU. Nao existe medida do
+   * caminho de outra pessoa daqui — o que o outro ve, so ele mede.
+   *
+   * O que aparece na tela e metade do caminho de voz, nao o total: o audio
+   * ainda passa pelo servidor e desce pro outro lado. Dois amigos com 30ms
+   * cada estao a uns 60ms um do outro.
+   */
+  useEffect(() => {
+    if (!channelId) {
+      setPing(null);
+      return;
+    }
+    let vivo = true;
+
+    const medir = async () => {
+      const pcm = roomRef.current?.engine?.pcManager;
+      // O publisher so existe depois de publicar algo; o subscriber, depois
+      // de receber. Sozinho na sala, um dos dois pode nao ter subido ainda.
+      for (const t of [pcm?.publisher, pcm?.subscriber]) {
+        let report: RTCStatsReport | undefined;
+        try {
+          report = await t?.getStats();
+        } catch {
+          continue;
+        }
+        if (!report) continue;
+
+        let rtt: number | null = null;
+        report.forEach((s) => {
+          const st = s as RTCStats & {
+            nominated?: boolean;
+            state?: string;
+            currentRoundTripTime?: number;
+          };
+          if (
+            st.type === 'candidate-pair' &&
+            st.state === 'succeeded' &&
+            st.nominated &&
+            typeof st.currentRoundTripTime === 'number'
+          ) {
+            rtt = st.currentRoundTripTime;
+          }
+        });
+
+        if (rtt !== null && vivo) {
+          setPing(Math.round(rtt * 1000));
+          return;
+        }
+      }
+      // Nenhum par nominado ainda: melhor manter o ultimo valor do que
+      // piscar um trace vazio a cada volta enquanto o ICE nao assenta.
+    };
+
+    void medir();
+    const id = setInterval(() => void medir(), 2000);
+    return () => {
+      vivo = false;
+      clearInterval(id);
+    };
+  }, [channelId]);
+
   // --- Push-to-talk ------------------------------------------------------
   useEffect(() => window.disc.onPushToTalk(setPttDown), []);
 
@@ -633,7 +969,8 @@ export function useRoom(onChatMessage: (m: Message) => void) {
 
   return {
     settings, channelId, connecting, peers, screens, audios, screenVolumes,
-    micOn: micLive, micWanted, pttDown, deafened, sharing, error, micLevel,
+    micOn: micLive, micWanted, pttDown, deafened, sharing, error, micLevel, ping,
+    localScreen, assistindo, toggleAssistir,
     connect, disconnect, toggleMic, toggleDeafen, setPeerVolume, setScreenVolume,
     startShare, stopShare, broadcastChat, updateSettings,
   };

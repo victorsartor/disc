@@ -140,6 +140,19 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
     ...speakers.map((d) => ({ value: d.deviceId, label: d.label || 'Saída' })),
   ];
 
+  /**
+   * Monitores do PipeWire — as "escutas" do que está saindo pela caixa.
+   *
+   * Aparecem misturados aos microfones na lista de entradas, e o nome é o
+   * único jeito de separá-los. O rótulo vem traduzido conforme o idioma do
+   * sistema, daí as duas formas.
+   */
+  const monitores = mics.filter((d) => /monitor|monitor de/i.test(d.label));
+  const monitorOptions = [
+    { value: '', label: 'Sem som (só vídeo)' },
+    ...monitores.map((d) => ({ value: d.deviceId, label: d.label })),
+  ];
+
   return (
     <div className="modal" onClick={onClose}>
       <div className="modal__box modal__box--narrow" onClick={(e) => e.stopPropagation()}>
@@ -307,6 +320,46 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
               />
             </div>
           </section>
+
+          {/* Só no Linux: no Windows o som da tela vem junto com a captura,
+              e não há nada pra escolher aqui. */}
+          {window.disc.platform === 'linux' && (
+            <section className="settings__group">
+              <h3 className="settings__title">Som ao compartilhar tela</h3>
+
+              <p className="settings__hint">
+                No Linux o som não vem junto com a tela — ele é gravado à parte,
+                de um &quot;monitor&quot;, que é uma escuta do que sai pela sua
+                caixa de som.
+              </p>
+
+              <div className="settings__row">
+                <span className="settings__label">Gravar de</span>
+                <Select
+                  label="Som ao compartilhar tela"
+                  value={settings.screenAudioDeviceId ?? ''}
+                  options={monitorOptions}
+                  onChange={(v) => void onPatch({ screenAudioDeviceId: v || null })}
+                />
+              </div>
+
+              {monitores.length === 0 ? (
+                <p className="settings__hint settings__hint--warn">
+                  Nenhum monitor apareceu. Costuma ser o PipeWire não estar
+                  expondo a escuta da saída — sem isso, só dá pra compartilhar
+                  sem som por aqui.
+                </p>
+              ) : (
+                <p className="settings__hint settings__hint--warn">
+                  Atenção ao eco: o monitor grava TUDO que sai pela sua caixa,
+                  e a voz das outras pessoas também sai por ela. Do jeito
+                  simples, quem te ouve vai se ouvir de volta. Pra evitar,
+                  mande a Disneia pra uma saída de áudio diferente da do jogo
+                  em Configurações do sistema → Áudio → Aplicativos.
+                </p>
+              )}
+            </section>
+          )}
 
           <section className="settings__group">
             <h3 className="settings__title">Overlay</h3>

@@ -1,8 +1,8 @@
 {
   "name": "disneia-client",
   "private": true,
-  "version": "0.10.0",
-  "description": "Voz, chat e compartilhamento de tela para um grupo fechado de amigos",
+  "version": "0.23.0",
+  "description": "Disneia",
   "author": "Victor",
   "type": "module",
   "main": "dist-electron/main.js",

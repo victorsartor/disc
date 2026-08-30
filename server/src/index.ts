@@ -2,9 +2,11 @@ import Fastify from 'fastify';
 import { AccessToken } from 'livekit-server-sdk';
 import { config, CHANNELS, isValidChannel, MAX_MESSAGE_LENGTH } from './config.js';
 import { registerAuthRoutes, userFromRequest } from './auth.js';
-import { recentMessages, saveMessage, type User } from './db.js';
+import {
+  recentMessages, saveMessage, touchPresence, setStatus, findUserById, type User,
+} from './db.js';
 import { rateLimit } from './ratelimit.js';
-import { presence } from './presence.js';
+import { presence, usersPresence, statusEfetivo } from './presence.js';
 import { registerProfileRoutes } from './profile.js';
 
 const app = Fastify({
@@ -113,7 +115,44 @@ app.post('/api/rooms/:channelId/whip', async (req, reply) => {
 app.get('/api/presence', async (req, reply) => {
   const user = await requireUser(req, reply);
   if (!user) return;
-  return { channels: await presence() };
+  return { channels: await presence(), users: usersPresence() };
+});
+
+/**
+ * Batimento do app aberto.
+ *
+ * `ativo` é o que separa os dois relógios: toda batida diz "ainda estou
+ * aqui", mas só quem estava com o microfone aberto renova o contador dos 10
+ * minutos. Vem junto o status efetivo próprio, pra que o app mostre
+ * "Ausente" no seletor sem ter que refazer a mesma conta do lado de cá.
+ *
+ * `falou` era o nome deste campo até a 0.17.0, quando o critério era falar
+ * em vez de estar com o microfone aberto. Aceito aqui só para que um app
+ * ainda não atualizado não apareça ausente sem motivo; pode sair quando
+ * ninguém estiver mais nessa versão.
+ */
+app.post('/api/me/heartbeat', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return;
+
+  const { ativo, falou } = (req.body ?? {}) as { ativo?: unknown; falou?: unknown };
+  touchPresence(user.id, ativo === true || falou === true);
+
+  return { status: statusEfetivo(findUserById(user.id)!) };
+});
+
+/** O status que a pessoa escolhe no seletor. */
+app.patch('/api/me/status', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return;
+
+  const { status } = (req.body ?? {}) as { status?: unknown };
+  if (status !== 'disponivel' && status !== 'ausente' && status !== 'invisivel') {
+    return reply.code(400).send({ error: 'status inválido' });
+  }
+
+  setStatus(user.id, status);
+  return { status };
 });
 
 app.get('/api/messages', async (req, reply) => {

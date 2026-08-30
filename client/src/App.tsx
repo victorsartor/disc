@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Me, Message, UserProfile } from './types';
-import { useRoom } from './lib/useRoom';
-import { usePresence } from './lib/usePresence';
+import { MAX_ASSISTINDO, useRoom } from './lib/useRoom';
+import { usePresence, useStatus } from './lib/usePresence';
 import { useUpdate, blocksApp } from './lib/useUpdate';
 import { Login } from './components/Login';
 import { Updater } from './components/Updater';
@@ -13,7 +13,7 @@ import { ScreenPicker } from './components/ScreenPicker';
 import { Settings } from './components/Settings';
 import { ObsSetup } from './components/ObsSetup';
 import { Profile, UserCard } from './components/Profile';
-import { IconScreen, IconBroadcast } from './components/Icons';
+import { IconScreen, IconBroadcast, IconEye, IconEyeOff } from './components/Icons';
 import { DEFAULT_THEME, isThemeId, type ThemeId } from './lib/themes';
 
 export function App() {
@@ -76,7 +76,15 @@ export function App() {
     if (fundo && simbolo) void window.disc.titlebar(fundo, simbolo);
   }, [theme, settingsCarregou]);
 
-  const presence = usePresence(Boolean(loggedIn), room.channelId);
+  const { channels: presence, users } = usePresence(Boolean(loggedIn), room.channelId);
+
+  // Microfone aberto num canal é o que segura o status em "disponível".
+  //
+  // É micWanted, e não micOn: em apertar-para-falar o micOn pisca junto com
+  // a tecla, e ficar dez minutos sem apertar não é estar mudo — é estar
+  // ouvindo. O que conta é ter desligado o microfone de propósito.
+  const ativo = Boolean(room.channelId) && room.micWanted;
+  const status = useStatus(Boolean(loggedIn), ativo);
 
   /**
    * Clicar numa pessoa. Clicar em VOCÊ abre a aba de edição — é o mesmo
@@ -163,10 +171,16 @@ export function App() {
     });
   }, [room.channelId, activeName, room.peers, room.micOn, room.pttDown]);
 
+  // No Linux o seletor e do sistema (ver initDisplayMedia no main): abrir o
+  // nosso modal por cima so poria uma escolha em cima da outra — e a escolha
+  // feita nele nem sobrevive a viagem ate a captura.
+  const seletorProprio = window.disc.platform !== 'linux';
+
   const onShareClick = useCallback(() => {
     if (room.sharing) void room.stopShare();
-    else setPicking(true);
-  }, [room]);
+    else if (seletorProprio) setPicking(true);
+    else void room.startShare(null);
+  }, [room, seletorProprio]);
 
   // Atualizar vem antes de tudo, inclusive do login: nao adianta entrar numa
   // sala com uma versao que o resto do grupo ja deixou pra tras.
@@ -185,6 +199,10 @@ export function App() {
         activeChannel={room.channelId}
         peers={room.peers}
         presence={presence}
+        users={users}
+        status={status.efetivo}
+        statusEscolhido={status.escolhido}
+        onStatusChange={(s) => void status.escolher(s)}
         connecting={room.connecting}
         micOn={room.micOn}
         deafened={room.deafened}
@@ -203,10 +221,20 @@ export function App() {
       <div className="main">
         <div className="topbar">
           <span className="topbar__title">{activeName ?? 'Nenhum canal'}</span>
+
+          <Lives
+            transmitindo={room.peers
+              .filter((p) => p.isSharing && !p.isLocal)
+              .map((p) => ({ identity: p.identity, name: p.name }))}
+            assistindo={room.assistindo}
+            onToggle={room.toggleAssistir}
+          />
+
           {room.error && (
             <span style={{ color: 'var(--danger)', fontSize: 12.5 }}>{room.error}</span>
           )}
           <span className="topbar__spacer" />
+          {room.channelId && <Ping ms={room.ping} />}
           {room.channelId && (
             <>
               <button
@@ -235,6 +263,8 @@ export function App() {
           audios={room.audios}
           screenVolumes={room.screenVolumes}
           onScreenVolume={room.setScreenVolume}
+          onParar={room.toggleAssistir}
+          localScreen={room.localScreen}
         />
         <Chat messages={messages} onSend={sendChat} onOpenUser={openUser} />
       </div>
@@ -280,6 +310,82 @@ export function App() {
           onClose={() => setObsOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * O seu ping até o servidor de voz.
+ *
+ * Cada pessoa vê o PRÓPRIO número: o valor sai da conexão desta máquina com
+ * o SFU, e não existe jeito de medir daqui o caminho de outra pessoa. Se o
+ * seu amigo quiser saber o dele, ele lê o dele na tela dele.
+ *
+ * É meio caminho, não o total entre vocês dois: a voz ainda sobe até o
+ * servidor e desce do outro lado. Dois amigos com 30 ms cada estão a uns
+ * 60 ms um do outro.
+ *
+ * As faixas são as da conversa por voz, não as de jogo: até 60 ms ninguém
+ * percebe atraso na fala, até 120 dá pra conversar sem atropelo, e acima
+ * disso as pessoas começam a se cortar.
+ */
+function Ping({ ms }: { ms: number | null }) {
+  if (ms === null) return null;
+
+  const cor = ms <= 60 ? 'var(--ok)' : ms <= 120 ? 'var(--live)' : 'var(--danger)';
+  const nota = ms <= 60 ? 'ótimo' : ms <= 120 ? 'bom' : 'alto';
+
+  return (
+    <span className="ping" title={`Seu ping até o servidor de voz — ${nota}`}>
+      <span className="ping__bolinha" style={{ background: cor }} />
+      <span className="ping__valor">{ms}</span>
+      <span className="ping__ms">ms</span>
+    </span>
+  );
+}
+
+/**
+ * Quem está transmitindo, na barra de cima e não no palco.
+ *
+ * Mora aqui, ao lado do nome da sala, porque é informação sobre a SALA — e
+ * porque no palco ela roubava uma linha inteira da grade, deixando as
+ * transmissões com metade da altura que tinham direito.
+ *
+ * É também o caminho de volta: fechar uma live a tira do palco, e sem esta
+ * lista não haveria de onde reabri-la.
+ */
+function Lives({
+  transmitindo, assistindo, onToggle,
+}: {
+  transmitindo: { identity: string; name: string }[];
+  assistindo: string[];
+  onToggle: (identity: string) => void;
+}) {
+  if (transmitindo.length === 0) return null;
+  const cheio = assistindo.length >= MAX_ASSISTINDO;
+
+  return (
+    <div className="lives">
+      {transmitindo.map((t) => {
+        const vendo = assistindo.includes(t.identity);
+        return (
+          <button
+            key={t.identity}
+            className={`lives__item${vendo ? ' lives__item--vendo' : ''}`}
+            onClick={() => onToggle(t.identity)}
+            title={
+              vendo
+                ? `Parar de assistir ${t.name}`
+                : cheio
+                  ? `Assistir ${t.name} — a live aberta há mais tempo fecha pra abrir vaga`
+                  : `Assistir ${t.name}`
+            }
+          >
+            {vendo ? <IconEye size={13} /> : <IconEyeOff size={13} />}
+            <span className="lives__nome">{t.name}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
