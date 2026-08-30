@@ -112,7 +112,7 @@ const FROM_DOM_CODE: Record<string, number> = (() => {
 /** Esc nao vira atalho: e o jeito de cancelar a captura. */
 const ESC = UiohookKey.Escape;
 
-export function labelFor(keycode: number): string {
+function labelFor(keycode: number): string {
   return PT_BR[keycode] ?? FROM_LIB[keycode] ?? `Tecla ${keycode}`;
 }
 
@@ -146,10 +146,6 @@ export function resolveDomKey(
 
 export function isAvailable(): boolean {
   return available;
-}
-
-export function isRunning(): boolean {
-  return running;
 }
 
 export function init(onChange: Listener): void {
