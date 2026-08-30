@@ -1,5 +1,5 @@
 {
-  "name": "disc-client",
+  "name": "concord-client",
   "private": true,
   "version": "0.1.0",
   "description": "Voz, chat e compartilhamento de tela para um grupo fechado de amigos",
@@ -30,9 +30,9 @@
     "vite-plugin-electron-renderer": "^0.14.6"
   },
   "build": {
-    "appId": "com.disc.app",
-    "productName": "Disc",
-    "protocols": [{ "name": "Disc", "schemes": ["disc"] }],
+    "appId": "com.concord.app",
+    "productName": "Concord",
+    "protocols": [{ "name": "Concord", "schemes": ["disc"] }],
     "directories": { "output": "release" },
     "npmRebuild": false,
     "files": [

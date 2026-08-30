@@ -41,7 +41,7 @@ export function Sidebar({
     <aside className="sidebar">
       <div className="sidebar__brand">
         <span className="sidebar__dot" />
-        Disc
+        Concord
       </div>
 
       <div className="sidebar__scroll">
