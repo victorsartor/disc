@@ -42,6 +42,12 @@ export interface WhipConfig {
 
 export type VoiceMode = 'vad' | 'ptt';
 
+/** Tecla do push-to-talk: keycode do uiohook + como mostrar na tela. */
+export interface KeyBinding {
+  keycode: number;
+  label: string;
+}
+
 export interface Settings {
   voiceMode: VoiceMode;
   pttKeycode: number | null;
@@ -73,8 +79,9 @@ export interface DiscApi {
   settings: {
     get(): Promise<Settings>;
     patch(patch: Partial<Settings>): Promise<Settings>;
-    captureKey(): Promise<{ keycode: number; label: string } | null>;
+    captureKey(): Promise<KeyBinding | null>;
     cancelKeyCapture(): Promise<void>;
+    resolveKey(code: string, printable?: string): Promise<KeyBinding | null>;
     setVolume(identity: string, volume: number): Promise<void>;
   };
   overlay: {

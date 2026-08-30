@@ -1,26 +1,50 @@
 /* ── Deep Sea ────────────────────────────────────────────────────────────
-   Midnight navy, foggy teal e arctic white.
-   As 5 cores da paleta + 3 derivadas funcionais (estado, perigo, ao vivo).
+   Paleta e sistema visual do DESIGN.md ("Serene Power"): tema escuro em
+   azuis, profundidade por CAMADA TONAL e desfoque em vez de sombra, e
+   contorno de 1px no lugar de borda dura.
    ──────────────────────────────────────────────────────────────────────── */
 :root {
+  /* As 5 cores da paleta */
   --ink: #0d1b2a;
   --prussian: #1b263b;
   --dusk: #415a77;
   --lavender: #778da9;
   --alabaster: #e0e1dd;
 
-  /* Derivadas — teal vem do "foggy teal" da paleta */
+  /* Derivadas funcionais — teal vem do "foggy teal" da paleta */
   --accent: #4cc9c0;
   --accent-dim: rgba(76, 201, 192, 0.14);
+  --accent-glow: rgba(76, 201, 192, 0.3);
   --danger: #e5484d;
   --live: #e8a33d;
 
-  --surface: var(--prussian);
-  --surface-hi: #22304a;
-  --line: rgba(65, 90, 119, 0.5);
+  /* Camadas: elevação é tom, não sombra */
+  --level-0: #0a1521; /* o fundo de tudo, um passo abaixo do ink */
+  --level-1: var(--ink); /* canvas do chat, palco */
+  --level-2: var(--prussian); /* sidebar, topbar, modais */
+  --level-3: #22304a; /* hover e estados levantados */
+  --glass: rgba(65, 90, 119, 0.2); /* flutuantes, com desfoque atrás */
 
-  --radius: 10px;
-  --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+  /* Contornos, não bordas */
+  --line: rgba(65, 90, 119, 0.3);
+  --line-strong: rgba(65, 90, 119, 0.55);
+
+  /* Realce de linha inteira ao passar o mouse (5% de lavanda) */
+  --hover: rgba(119, 141, 169, 0.07);
+
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --font: "Inter Variable", "Segoe UI Variable Text", "Segoe UI", system-ui,
+    -apple-system, sans-serif;
+  --mono: "JetBrains Mono Variable", Consolas, "Courier New", monospace;
+
+  /* Chromium usa isto pra desenhar checkbox, range e barra de rolagem no
+     tom certo. Sem isso eles saem claros no meio de um app escuro. */
+  color-scheme: dark;
 }
 
 * {
@@ -35,9 +59,11 @@ body,
 }
 
 body {
-  background: var(--ink);
+  background: var(--level-0);
   color: var(--alabaster);
-  font: 14px/1.55 var(--font);
+  font: 400 14px/1.5 var(--font);
+  font-feature-settings: "cv05" 1; /* "l" com cauda: distingue de "I" */
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
   user-select: none;
 }
@@ -57,31 +83,51 @@ textarea {
   user-select: text;
 }
 
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--dusk);
-  border-radius: 5px;
+  background: var(--line-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--lavender);
+  background-clip: content-box;
+}
+
+/* Rótulo de seção: caixa alta, pequeno, espaçado */
+.sidebar__label,
+.settings__title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--lavender);
+  margin: 0;
 }
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
 .app {
   display: grid;
-  grid-template-columns: 248px 1fr;
+  grid-template-columns: 240px 1fr;
   height: 100%;
+  background: var(--level-1);
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────── */
 .sidebar {
-  background: var(--prussian);
+  background: var(--level-2);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -89,13 +135,14 @@ textarea {
 }
 
 .sidebar__brand {
-  padding: 16px 18px;
+  padding: 16px;
   border-bottom: 1px solid var(--line);
-  font-weight: 650;
-  letter-spacing: 0.02em;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
 }
 
 .sidebar__dot {
@@ -103,37 +150,36 @@ textarea {
   height: 8px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim), 0 0 10px var(--accent-glow);
 }
 
 .sidebar__scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 14px 10px;
+  padding: 16px 8px;
   min-height: 0;
 }
 
 .sidebar__label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--lavender);
-  padding: 0 8px 8px;
+  padding: 0 8px 10px;
 }
 
 /* ── Canal de voz ────────────────────────────────────────────────────── */
 .channel {
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   margin-bottom: 4px;
-  overflow: hidden;
+}
+
+.channel--active {
+  background: rgba(65, 90, 119, 0.14);
+  padding-bottom: 4px;
 }
 
 .channel__head {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   padding: 9px 10px;
   border-radius: var(--radius);
   color: var(--lavender);
@@ -142,7 +188,7 @@ textarea {
 }
 
 .channel__head:hover {
-  background: var(--surface-hi);
+  background: var(--hover);
   color: var(--alabaster);
 }
 
@@ -154,6 +200,8 @@ textarea {
 .channel__icon {
   flex-shrink: 0;
   opacity: 0.85;
+  display: grid;
+  place-items: center;
 }
 
 .channel__name {
@@ -163,15 +211,21 @@ textarea {
 
 .channel__count {
   font-size: 11px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  padding: 1px 7px;
-  border-radius: 20px;
-  background: var(--dusk);
+  min-width: 20px;
+  text-align: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--glass);
   color: var(--alabaster);
 }
 
 .channel__members {
-  padding: 2px 0 6px 12px;
+  padding: 2px 6px 2px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 /* ── Participante ────────────────────────────────────────────────────── */
@@ -180,29 +234,31 @@ textarea {
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--lavender);
   font-size: 13px;
+  transition: background 0.12s;
 }
 
 .member:hover {
-  background: var(--surface-hi);
+  background: var(--hover);
 }
 
 .member__avatar {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: var(--dusk);
   object-fit: cover;
-  border: 2px solid transparent;
-  transition: border-color 0.1s, box-shadow 0.1s;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  transition: outline-color 0.12s, box-shadow 0.12s;
   flex-shrink: 0;
 }
 
 .member--speaking .member__avatar {
-  border-color: var(--accent);
-  box-shadow: 0 0 9px var(--accent-dim);
+  outline-color: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
 }
 
 .member--speaking .member__name {
@@ -218,10 +274,11 @@ textarea {
 
 .member__tag {
   font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
   font-weight: 700;
   letter-spacing: 0.04em;
+  flex-shrink: 0;
 }
 
 .member__tag--live {
@@ -231,6 +288,8 @@ textarea {
 
 .member__icon--muted {
   color: var(--danger);
+  display: grid;
+  place-items: center;
 }
 
 /* ── Barra do usuário ────────────────────────────────────────────────── */
@@ -239,21 +298,23 @@ textarea {
   padding: 10px 12px;
   display: flex;
   align-items: center;
-  gap: 9px;
-  background: var(--ink);
+  gap: 8px;
+  background: var(--level-0);
 }
 
 .userbar__avatar {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: var(--dusk);
   object-fit: cover;
+  flex-shrink: 0;
 }
 
 .userbar__info {
   flex: 1;
   min-width: 0;
+  margin-right: 2px;
 }
 
 .userbar__name {
@@ -267,6 +328,9 @@ textarea {
 .userbar__status {
   font-size: 11px;
   color: var(--lavender);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .userbar__status--connected {
@@ -276,16 +340,22 @@ textarea {
 .iconbtn {
   width: 30px;
   height: 30px;
+  flex-shrink: 0;
   display: grid;
   place-items: center;
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--lavender);
   transition: background 0.12s, color 0.12s;
 }
 
-.iconbtn:hover {
-  background: var(--surface-hi);
+.iconbtn:hover:not(:disabled) {
+  background: var(--glass);
   color: var(--alabaster);
+}
+
+.iconbtn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .iconbtn--on {
@@ -302,21 +372,24 @@ textarea {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  background: var(--level-1);
 }
 
 .topbar {
-  height: 48px;
+  height: 52px;
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 18px;
-  background: var(--prussian);
+  gap: 10px;
+  padding: 0 16px;
+  background: var(--level-2);
   flex-shrink: 0;
 }
 
 .topbar__title {
+  font-size: 15px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .topbar__spacer {
@@ -325,11 +398,11 @@ textarea {
 
 /* ── Palco (telas compartilhadas) ────────────────────────────────────── */
 .stage {
-  background: var(--ink);
+  background: var(--level-0);
   border-bottom: 1px solid var(--line);
-  padding: 12px;
+  padding: 16px;
   display: grid;
-  gap: 12px;
+  gap: 16px;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
   max-height: 58%;
   overflow-y: auto;
@@ -340,7 +413,7 @@ textarea {
   position: relative;
   background: #000;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   overflow: hidden;
   aspect-ratio: 16 / 9;
 }
@@ -354,13 +427,15 @@ textarea {
 
 .tile__label {
   position: absolute;
-  left: 8px;
-  bottom: 8px;
-  background: rgba(13, 27, 42, 0.82);
+  left: 10px;
+  bottom: 10px;
+  background: var(--glass);
+  backdrop-filter: blur(12px);
   border: 1px solid var(--line);
-  padding: 3px 9px;
-  border-radius: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
   font-size: 12px;
+  font-weight: 500;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -377,20 +452,27 @@ textarea {
 .chat__log {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 18px;
+  padding: 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 4px;
 }
 
 .msg {
   display: flex;
-  gap: 10px;
+  gap: 12px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  transition: background 0.1s;
+}
+
+.msg:hover {
+  background: var(--hover);
 }
 
 .msg__avatar {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: var(--dusk);
   object-fit: cover;
@@ -409,15 +491,19 @@ textarea {
 
 .msg__author {
   font-weight: 600;
-  font-size: 13.5px;
+  font-size: 14px;
+  letter-spacing: -0.005em;
 }
 
 .msg__time {
   font-size: 11px;
+  font-weight: 500;
   color: var(--lavender);
 }
 
 .msg__text {
+  font-size: 15px;
+  line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
@@ -425,24 +511,28 @@ textarea {
 }
 
 .chat__composer {
-  padding: 0 18px 18px;
+  padding: 4px 16px 16px;
   flex-shrink: 0;
 }
 
 .chat__input {
   width: 100%;
-  background: var(--prussian);
+  background: var(--level-0);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 11px 14px;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-size: 15px;
+  line-height: 1.45;
   resize: none;
   outline: none;
   max-height: 140px;
-  transition: border-color 0.13s;
+  transition: border-color 0.13s, box-shadow 0.13s;
 }
 
+/* "Ghost input" do DESIGN.md: no foco a borda ganha um halo suave */
 .chat__input:focus {
   border-color: var(--dusk);
+  box-shadow: 0 0 0 4px rgba(65, 90, 119, 0.22);
 }
 
 .chat__input::placeholder {
@@ -451,16 +541,16 @@ textarea {
 
 /* ── Botões ──────────────────────────────────────────────────────────── */
 .btn {
-  padding: 8px 15px;
-  border-radius: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
   font-size: 13px;
   font-weight: 600;
   background: var(--dusk);
   color: var(--alabaster);
-  transition: filter 0.13s, background 0.13s;
+  transition: filter 0.13s, background 0.13s, border-color 0.13s;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   filter: brightness(1.16);
 }
 
@@ -477,18 +567,26 @@ textarea {
 
 .btn--danger {
   background: var(--danger);
-  color: var(--alabaster);
+  color: #fff;
 }
 
 .btn--ghost {
   background: transparent;
-  border: 1px solid var(--dusk);
+  border: 1px solid var(--line-strong);
   color: var(--lavender);
 }
 
-.btn--ghost:hover {
+.btn--ghost:hover:not(:disabled) {
   color: var(--alabaster);
-  background: var(--surface-hi);
+  background: var(--glass);
+  border-color: var(--dusk);
+  filter: none;
+}
+
+.btn--sm {
+  padding: 5px 11px;
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 /* ── Login ───────────────────────────────────────────────────────────── */
@@ -497,66 +595,70 @@ textarea {
   display: grid;
   place-items: center;
   background:
-    radial-gradient(ellipse at 50% 0%, rgba(65, 90, 119, 0.35), transparent 62%),
-    var(--ink);
+    radial-gradient(ellipse 70% 50% at 50% 0%, rgba(65, 90, 119, 0.38), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 50% 100%, rgba(76, 201, 192, 0.08), transparent 70%),
+    var(--level-0);
 }
 
 .login__card {
   width: 380px;
-  background: var(--prussian);
+  background: linear-gradient(180deg, var(--prussian), var(--ink));
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   padding: 40px 36px;
   text-align: center;
 }
 
 .login__mark {
-  width: 52px;
-  height: 52px;
-  margin: 0 auto 18px;
-  border-radius: 15px;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 20px;
+  border-radius: var(--radius-lg);
   display: grid;
   place-items: center;
   background: linear-gradient(150deg, var(--accent), var(--dusk));
   color: var(--ink);
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 800;
+  box-shadow: 0 0 28px var(--accent-dim);
 }
 
 .login__title {
   margin: 0 0 6px;
-  font-size: 21px;
-  font-weight: 650;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .login__sub {
-  margin: 0 0 26px;
+  margin: 0 0 28px;
   color: var(--lavender);
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 .login__note {
   margin: 18px 0 0;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--lavender);
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
-/* ── Modal (seletor de tela) ─────────────────────────────────────────── */
+/* ── Modal ───────────────────────────────────────────────────────────── */
 .modal {
   position: fixed;
   inset: 0;
-  background: rgba(13, 27, 42, 0.86);
+  background: rgba(6, 13, 21, 0.72);
+  backdrop-filter: blur(6px);
   display: grid;
   place-items: center;
   z-index: 50;
-  padding: 30px;
+  padding: 32px;
 }
 
 .modal__box {
-  background: var(--prussian);
+  background: var(--level-2);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   width: min(880px, 100%);
   max-height: 100%;
   display: flex;
@@ -564,10 +666,16 @@ textarea {
   overflow: hidden;
 }
 
+.modal__box--narrow {
+  width: min(540px, 100%);
+}
+
 .modal__head {
   padding: 18px 22px;
   border-bottom: 1px solid var(--line);
-  font-weight: 650;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .modal__grid {
@@ -588,9 +696,9 @@ textarea {
 
 .source {
   border: 2px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--ink);
+  background: var(--level-0);
   text-align: left;
   transition: border-color 0.12s;
 }
@@ -612,7 +720,7 @@ textarea {
 }
 
 .source__name {
-  padding: 7px 9px;
+  padding: 8px 10px;
   font-size: 12px;
   color: var(--lavender);
   overflow: hidden;
@@ -624,7 +732,7 @@ textarea {
   color: var(--lavender);
   text-align: center;
   padding: 40px 20px;
-  font-size: 13.5px;
+  font-size: 14px;
 }
 
 /* ── Configurações ───────────────────────────────────────────────────── */
@@ -633,7 +741,7 @@ textarea {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 26px;
 }
 
 .settings__group {
@@ -642,55 +750,151 @@ textarea {
   gap: 10px;
 }
 
-.settings__title {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--lavender);
-}
-
 .settings__row {
   display: flex;
   align-items: center;
   gap: 12px;
   justify-content: space-between;
+  min-height: 36px;
 }
 
 .settings__label {
-  font-size: 13.5px;
-}
-
-.settings__select {
-  flex: 1;
-  max-width: 62%;
-  background: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 10px;
-  outline: none;
-}
-
-.settings__select:focus {
-  border-color: var(--dusk);
+  font-size: 14px;
+  flex-shrink: 0;
 }
 
 .settings__check {
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
   accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .settings__hint {
   margin: 0;
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--lavender);
 }
 
 .settings__hint--warn {
   color: var(--live);
+}
+
+/* ── Select próprio (ver Select.tsx) ─────────────────────────────────── */
+.select {
+  position: relative;
+  flex: 1;
+  max-width: 62%;
+  min-width: 0;
+}
+
+.select__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--level-0);
+  color: var(--alabaster);
+  font-size: 13px;
+  text-align: left;
+  transition: border-color 0.13s, box-shadow 0.13s;
+}
+
+.select__trigger:hover {
+  border-color: var(--line-strong);
+}
+
+.select--open .select__trigger {
+  border-color: var(--dusk);
+  box-shadow: 0 0 0 4px rgba(65, 90, 119, 0.22);
+}
+
+.select__value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select__chevron {
+  flex-shrink: 0;
+  color: var(--lavender);
+  transition: transform 0.15s;
+}
+
+.select--open .select__chevron {
+  transform: rotate(180deg);
+}
+
+/* Posicionada em coordenadas de tela pelo Select.tsx (left/width/top ou
+   bottom vem no style inline) para nao ser cortada pela borda do modal. */
+.select__list {
+  position: fixed;
+  z-index: 100;
+  max-height: 230px;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* Camada 2 do DESIGN.md: vidro sobre desfoque, contorno no lugar de sombra.
+     O fundo sólido embaixo garante leitura mesmo sem suporte a blur. */
+  background: var(--level-3);
+  background-image: linear-gradient(var(--glass), var(--glass));
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+}
+
+.select__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--alabaster);
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.select__option:hover:not(:disabled) {
+  background: rgba(119, 141, 169, 0.16);
+}
+
+.select__option:disabled {
+  color: var(--lavender);
+  opacity: 0.5;
+  cursor: default;
+}
+
+.select__option--on {
+  color: var(--accent);
+}
+
+.select__option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select__option-hint {
+  font-size: 11px;
+  color: var(--lavender);
+  flex-shrink: 0;
+}
+
+.select__check {
+  flex-shrink: 0;
+  color: var(--accent);
 }
 
 /* ── Volume por pessoa ───────────────────────────────────────────────── */
@@ -700,21 +904,25 @@ textarea {
 
 .volume {
   margin: 4px 0 6px;
-  padding: 9px 11px;
-  background: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: 9px;
+  padding: 10px 12px;
+  background: var(--level-3);
+  background-image: linear-gradient(var(--glass), var(--glass));
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
 }
 
 .volume__head {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
+  font-weight: 500;
   color: var(--lavender);
-  margin-bottom: 7px;
+  margin-bottom: 8px;
 }
 
 .volume__value {
+  font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--accent);
 }
@@ -722,6 +930,7 @@ textarea {
 .volume__slider {
   width: 100%;
   accent-color: var(--accent);
+  cursor: pointer;
 }
 
 /* ── Campos de configuração do OBS ───────────────────────────────────── */
@@ -733,7 +942,7 @@ textarea {
 }
 
 .field__label {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--lavender);
   min-width: 150px;
   flex-shrink: 0;
@@ -742,11 +951,11 @@ textarea {
 .field__value {
   flex: 1;
   min-width: 0;
-  background: var(--ink);
+  background: var(--level-0);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 5px 9px;
-  font-size: 12.5px;
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 13px;
   color: var(--alabaster);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -755,14 +964,8 @@ textarea {
 }
 
 .field__value--mono {
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 11.5px;
-}
-
-.btn--sm {
-  padding: 5px 11px;
+  font-family: var(--mono);
   font-size: 12px;
-  flex-shrink: 0;
 }
 
 /* ── Captura de tecla do push-to-talk ────────────────────────────────── */
@@ -771,12 +974,12 @@ textarea {
   align-items: center;
   justify-content: center;
   gap: 9px;
-  min-width: 190px;
+  min-width: 200px;
   min-height: 38px;
   padding: 7px 14px;
-  border-radius: 9px;
-  border: 1.5px solid var(--dusk);
-  background: var(--ink);
+  border-radius: var(--radius);
+  border: 1.5px solid var(--line-strong);
+  background: var(--level-0);
   color: var(--lavender);
   font-size: 13px;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
@@ -785,11 +988,6 @@ textarea {
 .keybind:hover {
   border-color: var(--lavender);
   color: var(--alabaster);
-}
-
-.keybind:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* Estado "escutando": borda pulsando pra deixar claro que espera a tecla */
@@ -830,14 +1028,14 @@ textarea {
 }
 
 .keybind__key {
-  font-family: inherit;
-  font-size: 12.5px;
+  font-family: var(--mono);
+  font-size: 12px;
   font-weight: 600;
   color: var(--alabaster);
-  background: var(--surface-hi);
-  border: 1px solid var(--dusk);
+  background: var(--level-3);
+  border: 1px solid var(--line-strong);
   border-bottom-width: 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px 9px;
 }
 

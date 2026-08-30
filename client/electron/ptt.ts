@@ -1,5 +1,5 @@
 import { uIOhook, UiohookKey } from 'uiohook-napi';
-import { getSettings, patchSettings } from './settings.js';
+import { getSettings } from './settings.js';
 
 /**
  * Hold-to-talk global.
@@ -38,23 +38,110 @@ const FROM_LIB: Record<number, string> = Object.fromEntries(
 );
 
 const PT_BR: Record<number, string> = {
-  [UiohookKey.Ctrl]: 'Ctrl esquerdo',
-  [UiohookKey.CtrlRight]: 'Ctrl direito',
-  [UiohookKey.Shift]: 'Shift esquerdo',
-  [UiohookKey.ShiftRight]: 'Shift direito',
-  [UiohookKey.Alt]: 'Alt esquerdo',
-  [UiohookKey.AltRight]: 'Alt direito',
+  [UiohookKey.Ctrl]: 'Ctrl esq.',
+  [UiohookKey.CtrlRight]: 'Ctrl dir.',
+  [UiohookKey.Shift]: 'Shift esq.',
+  [UiohookKey.ShiftRight]: 'Shift dir.',
+  [UiohookKey.Alt]: 'Alt esq.',
+  [UiohookKey.AltRight]: 'Alt dir.',
   [UiohookKey.Meta]: 'Windows',
-  [UiohookKey.Space]: 'Espaco',
+  [UiohookKey.MetaRight]: 'Windows dir.',
+  [UiohookKey.Space]: 'Espaço',
   [UiohookKey.CapsLock]: 'Caps Lock',
-  [UiohookKey.Backquote]: 'Crase',
+  [UiohookKey.Enter]: 'Enter',
+  [UiohookKey.Tab]: 'Tab',
+  [UiohookKey.Backspace]: 'Backspace',
+  [UiohookKey.ArrowUp]: 'Seta cima',
+  [UiohookKey.ArrowDown]: 'Seta baixo',
+  [UiohookKey.ArrowLeft]: 'Seta esq.',
+  [UiohookKey.ArrowRight]: 'Seta dir.',
+  [UiohookKey.Insert]: 'Insert',
+  [UiohookKey.Delete]: 'Delete',
+  [UiohookKey.Home]: 'Home',
+  [UiohookKey.End]: 'End',
+  [UiohookKey.PageUp]: 'Page Up',
+  [UiohookKey.PageDown]: 'Page Down',
+  [UiohookKey.NumLock]: 'Num Lock',
+  [UiohookKey.ScrollLock]: 'Scroll Lock',
+  [UiohookKey.PrintScreen]: 'Print Screen',
+  [UiohookKey.NumpadEnter]: 'Enter (num)',
+  [UiohookKey.NumpadAdd]: '+ (num)',
+  [UiohookKey.NumpadSubtract]: '- (num)',
+  [UiohookKey.NumpadMultiply]: '* (num)',
+  [UiohookKey.NumpadDivide]: '/ (num)',
+  [UiohookKey.NumpadDecimal]: '. (num)',
 };
+
+/**
+ * DOM KeyboardEvent.code -> keycode do uiohook.
+ *
+ * Existe porque a captura da tecla acontece no renderer, com o keydown do
+ * proprio DOM: e o unico caminho que sempre dispara enquanto a janela tem
+ * foco. O hook global continua sendo quem DETECTA a tecla durante o jogo -
+ * este mapa so traduz o que o usuario apertou na tela de configuracoes.
+ *
+ * Fora de letras e digitos, os nomes do uiohook ja batem com os do DOM
+ * (Space, F5, Numpad3, ArrowLeft, Backquote...), entao o resto e copiado.
+ */
+const FROM_DOM_CODE: Record<string, number> = (() => {
+  const map: Record<string, number> = {
+    ControlLeft: UiohookKey.Ctrl,
+    ControlRight: UiohookKey.CtrlRight,
+    ShiftLeft: UiohookKey.Shift,
+    ShiftRight: UiohookKey.ShiftRight,
+    AltLeft: UiohookKey.Alt,
+    AltRight: UiohookKey.AltRight,
+    MetaLeft: UiohookKey.Meta,
+    MetaRight: UiohookKey.MetaRight,
+    OSLeft: UiohookKey.Meta,
+    OSRight: UiohookKey.MetaRight,
+  };
+
+  for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+    map[`Key${letter}`] = (UiohookKey as Record<string, number>)[letter];
+  }
+  for (let d = 0; d <= 9; d++) {
+    map[`Digit${d}`] = (UiohookKey as Record<string, number>)[String(d)];
+  }
+  for (const [name, code] of Object.entries(UiohookKey)) {
+    if (typeof code === 'number' && !(name in map)) map[name] = code;
+  }
+  return map;
+})();
 
 /** Esc nao vira atalho: e o jeito de cancelar a captura. */
 const ESC = UiohookKey.Escape;
 
 export function labelFor(keycode: number): string {
   return PT_BR[keycode] ?? FROM_LIB[keycode] ?? `Tecla ${keycode}`;
+}
+
+/**
+ * Traduz uma tecla vinda do DOM em keycode + rotulo.
+ *
+ * `printable` e o KeyboardEvent.key: quando e um unico caractere, ele mostra
+ * o que esta ESCRITO na tecla do usuario (Ç no ABNT2, por exemplo), coisa que
+ * o code sozinho nao sabe. Fora isso, cai no nome traduzido.
+ *
+ * Retorna null para teclas que o uiohook nao enxerga - o renderer ignora e
+ * continua escutando em vez de vincular algo que nunca vai funcionar.
+ */
+export function resolveDomKey(
+  code: string,
+  printable?: string,
+): { keycode: number; label: string } | null {
+  const keycode = FROM_DOM_CODE[code];
+  if (typeof keycode !== 'number') return null;
+
+  const named = PT_BR[keycode];
+  if (named) return { keycode, label: named };
+
+  // [...str] conta caracteres, nao unidades UTF-16: acentos e emoji nao viram
+  // "2 caracteres" e escapam do teste.
+  if (printable && [...printable].length === 1 && printable !== ' ') {
+    return { keycode, label: printable.toUpperCase() };
+  }
+  return { keycode, label: labelFor(keycode) };
 }
 
 export function isAvailable(): boolean {
@@ -165,9 +252,11 @@ export function captureKey(timeoutMs = 15000): Promise<CapturedKey> {
       resolve(null);
     }, timeoutMs);
 
+    // Quem grava e o renderer, pelo settings:patch normal. Gravar tambem aqui
+    // daria dois escritores para o mesmo campo, com o cache do settings.ts no
+    // meio - e um deles sempre acabaria sobrescrevendo o outro.
     captureResolve = (key) => {
       clearTimeout(timer);
-      if (key) patchSettings({ pttKeycode: key.keycode, pttKeyLabel: key.label });
       resolve(key);
     };
   });

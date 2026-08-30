@@ -10,7 +10,7 @@ import {
 } from './settings.js';
 import {
   init as initPtt, syncWithSettings as syncPtt, shutdown as shutdownPtt,
-  captureKey, cancelCapture, isAvailable as pttAvailable,
+  captureKey, cancelCapture, isAvailable as pttAvailable, resolveDomKey,
 } from './ptt.js';
 import {
   showOverlay, hideOverlay, destroyOverlay, toggleOverlay,
@@ -229,6 +229,14 @@ ipcMain.handle('settings:patch', (_e, raw: unknown) => {
 });
 
 ipcMain.handle('settings:capture-key', () => captureKey());
+
+// Traduz a tecla que o renderer pegou no keydown do DOM para o keycode do
+// uiohook. O mapa vive no main porque e la que o UiohookKey existe - assim
+// nao ha uma segunda copia da tabela desatualizando em silencio.
+ipcMain.handle('settings:resolve-key', (_e, code: unknown, printable: unknown) =>
+  typeof code === 'string'
+    ? resolveDomKey(code, typeof printable === 'string' ? printable : undefined)
+    : null);
 
 ipcMain.handle('settings:set-volume', (_e, identity: string, volume: number) => {
   setVolume(identity, volume);

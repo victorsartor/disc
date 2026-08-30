@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import type { Settings as SettingsType } from '../types';
+import { useEffect, useRef, useState } from 'react';
+import type { KeyBinding, Settings as SettingsType } from '../types';
+import { Select } from './Select';
 
 interface Props {
   settings: SettingsType;
@@ -7,11 +8,19 @@ interface Props {
   onClose: () => void;
 }
 
+/** Depois desse tempo sem tecla nenhuma, a captura desiste sozinha. */
+const CAPTURE_TIMEOUT = 15000;
+
 export function Settings({ settings, onPatch, onClose }: Props) {
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
   const [speakers, setSpeakers] = useState<MediaDeviceInfo[]>([]);
   const [capturing, setCapturing] = useState(false);
   const [justBound, setJustBound] = useState(false);
+
+  // onPatch vem do useRoom e pode trocar de identidade a cada render. Numa
+  // dependencia de efeito isso rearmaria a captura no meio dela.
+  const patchRef = useRef(onPatch);
+  patchRef.current = onPatch;
 
   useEffect(() => {
     const load = async () => {
@@ -35,47 +44,97 @@ export function Settings({ settings, onPatch, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, capturing]);
 
-  const bindKey = async () => {
-    // Clicar de novo enquanto escuta cancela, em vez de nao fazer nada.
-    if (capturing) {
-      await window.disc.settings.cancelKeyCapture();
-      return;
-    }
-    setCapturing(true);
-    try {
-      const key = await window.disc.settings.captureKey();
-      if (key) {
-        await onPatch({ pttKeycode: key.keycode, pttKeyLabel: key.label });
+  /**
+   * Captura da tecla do push-to-talk.
+   *
+   * Caminho principal: keydown do DOM. Enquanto a janela tem foco - que e o
+   * caso logo depois do clique no botao - ele dispara para tudo, e o
+   * KeyboardEvent.key ainda entrega o caractere do layout do usuario (Ç no
+   * ABNT2), coisa que o keycode sozinho nao sabe.
+   *
+   * Em paralelo corre a captura pelo hook global, que funciona mesmo se a
+   * janela perder o foco no meio. Vale o primeiro que chegar; o outro morre
+   * no cancelKeyCapture.
+   */
+  useEffect(() => {
+    if (!capturing) return;
+    let done = false;
+
+    const finish = async (bind: KeyBinding | null) => {
+      if (done) return;
+      done = true;
+      void window.disc.settings.cancelKeyCapture();
+      if (bind) {
+        await patchRef.current({ pttKeycode: bind.keycode, pttKeyLabel: bind.label });
         setJustBound(true);
-        setTimeout(() => setJustBound(false), 1400);
+        window.setTimeout(() => setJustBound(false), 1600);
       }
-    } finally {
       setCapturing(false);
-    }
-  };
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Sem isso o Tab troca o foco e o Espaco reaciona o proprio botao.
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat) return;
+      if (e.code === 'Escape') {
+        void finish(null);
+        return;
+      }
+      // Tecla que o hook global nao enxerga nao serve pra PTT: ignora e
+      // continua escutando, em vez de vincular algo que nunca ia funcionar.
+      void window.disc.settings
+        .resolveKey(e.code, e.key)
+        .then((bind) => bind && finish(bind));
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    void window.disc.settings.captureKey().then((bind) => bind && finish(bind));
+    const timer = window.setTimeout(() => void finish(null), CAPTURE_TIMEOUT);
+
+    return () => {
+      done = true;
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.clearTimeout(timer);
+      void window.disc.settings.cancelKeyCapture();
+    };
+  }, [capturing]);
+
+  const micOptions = [
+    { value: '', label: 'Padrão do sistema' },
+    ...mics.map((d) => ({ value: d.deviceId, label: d.label || 'Microfone' })),
+  ];
+  const speakerOptions = [
+    { value: '', label: 'Padrão do sistema' },
+    ...speakers.map((d) => ({ value: d.deviceId, label: d.label || 'Saída' })),
+  ];
 
   return (
     <div className="modal" onClick={onClose}>
-      <div className="modal__box" style={{ width: 'min(520px, 100%)' }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal__box modal__box--narrow" onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">Configurações</div>
 
         <div className="settings">
           <section className="settings__group">
             <h3 className="settings__title">Voz</h3>
 
-            <label className="settings__row">
+            <div className="settings__row">
               <span className="settings__label">Modo</span>
-              <select
-                className="settings__select"
+              <Select
+                label="Modo de voz"
                 value={settings.voiceMode}
-                onChange={(e) => void onPatch({ voiceMode: e.target.value as 'vad' | 'ptt' })}
-              >
-                <option value="vad">Detecção de voz</option>
-                <option value="ptt" disabled={!settings.pttAvailable}>
-                  Apertar para falar
-                </option>
-              </select>
-            </label>
+                onChange={(v) => void onPatch({ voiceMode: v as 'vad' | 'ptt' })}
+                options={[
+                  { value: 'vad', label: 'Detecção de voz' },
+                  {
+                    value: 'ptt',
+                    label: 'Apertar para falar',
+                    disabled: !settings.pttAvailable,
+                    hint: settings.pttAvailable ? undefined : 'indisponível',
+                  },
+                ]}
+              />
+            </div>
 
             {!settings.pttAvailable && (
               <p className="settings__hint settings__hint--warn">
@@ -93,7 +152,7 @@ export function Settings({ settings, onPatch, onClose }: Props) {
                     className={`keybind${capturing ? ' keybind--listening' : ''}${
                       justBound ? ' keybind--bound' : ''
                     }`}
-                    onClick={() => void bindKey()}
+                    onClick={() => setCapturing((v) => !v)}
                   >
                     {capturing ? (
                       <>
@@ -125,37 +184,25 @@ export function Settings({ settings, onPatch, onClose }: Props) {
           <section className="settings__group">
             <h3 className="settings__title">Dispositivos</h3>
 
-            <label className="settings__row">
+            <div className="settings__row">
               <span className="settings__label">Microfone</span>
-              <select
-                className="settings__select"
+              <Select
+                label="Microfone"
                 value={settings.micDeviceId ?? ''}
-                onChange={(e) => void onPatch({ micDeviceId: e.target.value || null })}
-              >
-                <option value="">Padrão do sistema</option>
-                {mics.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || 'Microfone'}
-                  </option>
-                ))}
-              </select>
-            </label>
+                options={micOptions}
+                onChange={(v) => void onPatch({ micDeviceId: v || null })}
+              />
+            </div>
 
-            <label className="settings__row">
+            <div className="settings__row">
               <span className="settings__label">Saída</span>
-              <select
-                className="settings__select"
+              <Select
+                label="Saída de áudio"
                 value={settings.speakerDeviceId ?? ''}
-                onChange={(e) => void onPatch({ speakerDeviceId: e.target.value || null })}
-              >
-                <option value="">Padrão do sistema</option>
-                {speakers.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || 'Saída'}
-                  </option>
-                ))}
-              </select>
-            </label>
+                options={speakerOptions}
+                onChange={(v) => void onPatch({ speakerDeviceId: v || null })}
+              />
+            </div>
           </section>
 
           <section className="settings__group">

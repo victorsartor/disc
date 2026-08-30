@@ -31,6 +31,8 @@ const api = {
     patch: (patch: unknown) => ipcRenderer.invoke('settings:patch', patch),
     captureKey: () => ipcRenderer.invoke('settings:capture-key'),
     cancelKeyCapture: () => ipcRenderer.invoke('settings:cancel-capture'),
+    resolveKey: (code: string, printable?: string) =>
+      ipcRenderer.invoke('settings:resolve-key', code, printable),
     setVolume: (identity: string, volume: number) =>
       ipcRenderer.invoke('settings:set-volume', identity, volume),
   },
