@@ -46,6 +46,7 @@
       "output": "release"
     },
     "npmRebuild": false,
+    "electronLanguages": ["pt-BR", "en-US"],
     "files": [
       "dist/**/*",
       "dist-electron/**/*",

@@ -70,42 +70,48 @@ export function Sidebar({
         })}
       </div>
 
+      {/* Nome numa linha e controles na outra: com quatro botoes numa coluna
+          de 240px, tudo na mesma linha sobrava uma letra pro nome. */}
       <div className="userbar">
-        <img className="userbar__avatar" src={me.avatarUrl ?? undefined} alt="" referrerPolicy="no-referrer" />
-        <div className="userbar__info">
-          <div className="userbar__name">{me.name}</div>
-          <div className={`userbar__status${activeChannel ? ' userbar__status--connected' : ''}`}>
-            {status}
+        <div className="userbar__id">
+          <img className="userbar__avatar" src={me.avatarUrl ?? undefined} alt="" referrerPolicy="no-referrer" />
+          <div className="userbar__info">
+            <div className="userbar__name">{me.name}</div>
+            <div className={`userbar__status${activeChannel ? ' userbar__status--connected' : ''}`}>
+              {status}
+            </div>
           </div>
         </div>
 
-        <button
-          className={`iconbtn${!micOn ? ' iconbtn--on' : ''}`}
-          onClick={onToggleMic}
-          disabled={!activeChannel}
-          title={pttMode ? 'Em modo apertar para falar' : 'Microfone'}
-        >
-          {micOn ? <IconMic /> : <IconMicOff />}
-        </button>
-
-        <button
-          className={`iconbtn${deafened ? ' iconbtn--on' : ''}`}
-          onClick={onToggleDeafen}
-          disabled={!activeChannel}
-          title="Ensurdecer"
-        >
-          {deafened ? <IconHeadphonesOff /> : <IconHeadphones />}
-        </button>
-
-        <button className="iconbtn" onClick={onOpenSettings} title="Configurações">
-          <IconSettings />
-        </button>
-
-        {activeChannel && (
-          <button className="iconbtn" onClick={onLeave} title="Sair do canal">
-            <IconLeave />
+        <div className="userbar__actions">
+          <button
+            className={`iconbtn${!micOn ? ' iconbtn--on' : ''}`}
+            onClick={onToggleMic}
+            disabled={!activeChannel}
+            title={pttMode ? 'Em modo apertar para falar' : 'Microfone'}
+          >
+            {micOn ? <IconMic /> : <IconMicOff />}
           </button>
-        )}
+
+          <button
+            className={`iconbtn${deafened ? ' iconbtn--on' : ''}`}
+            onClick={onToggleDeafen}
+            disabled={!activeChannel}
+            title="Ensurdecer"
+          >
+            {deafened ? <IconHeadphonesOff /> : <IconHeadphones />}
+          </button>
+
+          <button className="iconbtn" onClick={onOpenSettings} title="Configurações">
+            <IconSettings />
+          </button>
+
+          {activeChannel && (
+            <button className="iconbtn" onClick={onLeave} title="Sair do canal">
+              <IconLeave />
+            </button>
+          )}
+        </div>
       </div>
     </aside>
   );
@@ -144,7 +150,16 @@ function MemberRow({
         <img className="member__avatar" src={peer.avatarUrl ?? undefined} alt="" referrerPolicy="no-referrer" />
         <span className="member__name">{peer.name}</span>
         {peer.isSharing && <span className="member__tag member__tag--live">AO VIVO</span>}
-        {peer.isMuted && <span className="member__icon--muted"><IconMicOff size={13} /></span>}
+        {peer.isMuted && (
+          <span className="member__icon--muted" title="Microfone desligado">
+            <IconMicOff size={13} />
+          </span>
+        )}
+        {peer.isDeafened && (
+          <span className="member__icon--muted" title="Não está ouvindo ninguém">
+            <IconHeadphonesOff size={13} />
+          </span>
+        )}
       </div>
 
       {open && !peer.isLocal && (

@@ -295,11 +295,31 @@ textarea {
 /* ── Barra do usuário ────────────────────────────────────────────────── */
 .userbar {
   border-top: 1px solid var(--line);
-  padding: 10px 12px;
+  padding: 10px 12px 12px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
   background: var(--level-0);
+}
+
+.userbar__id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Colunas iguais: os botões ocupam a largura toda e continuam alinhados
+   quando o de sair aparece e some conforme entra e sai do canal. */
+.userbar__actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+}
+
+.userbar__actions .iconbtn {
+  width: 100%;
 }
 
 .userbar__avatar {
@@ -314,7 +334,6 @@ textarea {
 .userbar__info {
   flex: 1;
   min-width: 0;
-  margin-right: 2px;
 }
 
 .userbar__name {

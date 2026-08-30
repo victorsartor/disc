@@ -17,6 +17,8 @@ export interface Peer {
   avatarUrl: string | null;
   isSpeaking: boolean;
   isMuted: boolean;
+  /** Sem ouvir ninguem. Nao vem da sala: e anunciado (ver announceState). */
+  isDeafened: boolean;
   isSharing: boolean;
   isLocal: boolean;
   volume: number;
@@ -63,6 +65,8 @@ export function useRoom(onChatMessage: (m: Message) => void) {
   // em que a sala foi criada e ficariam com estado velho.
   const deafenedRef = useRef(false);
   const micBeforeDeafenRef = useRef(true);
+  /** identity -> ensurdecido, do que cada um anunciou. */
+  const remoteDeafRef = useRef(new Map<string, boolean>());
 
   const [settings, setSettings] = useState<Settings | null>(null);
   const [channelId, setChannelId] = useState<string | null>(null);
@@ -110,6 +114,9 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     avatarUrl: readAvatar(p),
     isSpeaking: p.isSpeaking,
     isMuted: !p.isMicrophoneEnabled,
+    isDeafened: isLocal
+      ? deafenedRef.current
+      : (remoteDeafRef.current.get(p.identity) ?? false),
     isSharing: p.isScreenShareEnabled,
     isLocal,
     volume: settingsRef.current?.volumes[p.identity] ?? 1,
@@ -124,10 +131,36 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     ]);
   }, [toPeer]);
 
+  /**
+   * Anuncia o proprio estado de ensurdecido pro resto da sala.
+   *
+   * Ensurdecer e uma decisao 100% local: a gente so desliga as faixas que
+   * chegam, ninguem para de mandar audio. Entao nada disso aparece na sala
+   * sozinho - por isso o anuncio pelo data channel.
+   *
+   * Cada um anuncia o seu ao mudar de estado, ao entrar, e de novo toda vez
+   * que alguem entra (que e como quem chega depois descobre quem ja estava
+   * ensurdecido). Se um anuncio se perder, o unico prejuizo e um icone
+   * desatualizado - o audio de ninguem depende disso.
+   */
+  const announceState = useCallback(() => {
+    const room = roomRef.current;
+    if (!room) return;
+    room.localParticipant
+      .publishData(
+        encoder.encode(JSON.stringify({ kind: 'state', deafened: deafenedRef.current })),
+        { reliable: true },
+      )
+      .catch(() => {
+        /* sem sala ou sem permissao: o proximo anuncio corrige */
+      });
+  }, []);
+
   const disconnect = useCallback(async () => {
     const room = roomRef.current;
     roomRef.current = null;
     if (room) await room.disconnect();
+    remoteDeafRef.current.clear();
     setChannelId(null);
     setPeers([]);
     setScreens([]);
@@ -175,9 +208,13 @@ export function useRoom(onChatMessage: (m: Message) => void) {
               p.audioTrackPublications.forEach((pub) => pub.setEnabled(false));
             }
             playJoin();
+            // Quem chegou nao tem como saber que voce esta ensurdecido:
+            // isso nao viaja pela sala. Reanuncia pra ele.
+            announceState();
             syncPeers();
           })
-          .on(RoomEvent.ParticipantDisconnected, () => {
+          .on(RoomEvent.ParticipantDisconnected, (p: RemoteParticipant) => {
+            remoteDeafRef.current.delete(p.identity);
             playLeave();
             syncPeers();
           })
@@ -188,15 +225,21 @@ export function useRoom(onChatMessage: (m: Message) => void) {
           .on(RoomEvent.LocalTrackUnpublished, syncPeers)
           .on(RoomEvent.Disconnected, () => {
             roomRef.current = null;
+            remoteDeafRef.current.clear();
             setChannelId(null);
             setPeers([]);
             setScreens([]);
             setSharing(false);
           })
-          .on(RoomEvent.DataReceived, (payload: Uint8Array) => {
+          .on(RoomEvent.DataReceived, (payload: Uint8Array, from?: RemoteParticipant) => {
             try {
               const msg = JSON.parse(decoder.decode(payload));
-              if (msg?.kind === 'chat' && msg.message) chatCbRef.current(msg.message);
+              if (msg?.kind === 'chat' && msg.message) {
+                chatCbRef.current(msg.message);
+              } else if (msg?.kind === 'state' && from) {
+                remoteDeafRef.current.set(from.identity, Boolean(msg.deafened));
+                syncPeers();
+              }
             } catch {
               /* payload de outra versao do app: ignora */
             }
@@ -236,6 +279,8 @@ export function useRoom(onChatMessage: (m: Message) => void) {
         setMicWanted(true);
         setPttDown(false);
         playConnect();
+        // Quem ja estava na sala so fica sabendo do seu estado por aqui.
+        announceState();
         syncPeers();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'falha ao conectar');
@@ -244,7 +289,7 @@ export function useRoom(onChatMessage: (m: Message) => void) {
         setConnecting(false);
       }
     },
-    [channelId, disconnect, syncPeers],
+    [channelId, disconnect, syncPeers, announceState],
   );
 
   // --- Microfone ---------------------------------------------------------
@@ -276,8 +321,9 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     }
     deafenedRef.current = next;
     setDeafened(next);
+    announceState();
     syncPeers();
-  }, [deafened, micWanted, syncPeers]);
+  }, [deafened, micWanted, syncPeers, announceState]);
 
   /** Volume individual por pessoa (0 a 2), persistido entre sessoes. */
   const setPeerVolume = useCallback((identity: string, volume: number) => {
