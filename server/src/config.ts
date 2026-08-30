@@ -18,6 +18,10 @@ export const config = {
 
   livekit: {
     url: required('LIVEKIT_URL'),
+    // Endereço interno, dentro da rede do compose. O LIVEKIT_URL público sai
+    // pela tailnet e volta pelo Caddy só pra chegar no container vizinho —
+    // daqui o LiveKit está a um hop de distância.
+    internalUrl: process.env.LIVEKIT_INTERNAL_URL ?? 'http://livekit:7880',
     apiKey: required('LIVEKIT_API_KEY'),
     apiSecret: required('LIVEKIT_API_SECRET'),
   },

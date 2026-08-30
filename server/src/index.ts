@@ -4,6 +4,8 @@ import { config, CHANNELS, isValidChannel, MAX_MESSAGE_LENGTH } from './config.j
 import { registerAuthRoutes, userFromRequest } from './auth.js';
 import { recentMessages, saveMessage, type User } from './db.js';
 import { rateLimit } from './ratelimit.js';
+import { presence } from './presence.js';
+import { registerProfileRoutes } from './profile.js';
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? 'info' },
@@ -11,6 +13,7 @@ const app = Fastify({
 });
 
 registerAuthRoutes(app);
+registerProfileRoutes(app);
 
 /** Exige sessão válida. Responde 401 e retorna null se não houver. */
 async function requireUser(req: any, reply: any): Promise<User | null> {
@@ -101,6 +104,16 @@ app.post('/api/rooms/:channelId/whip', async (req, reply) => {
     bearerToken: await at.toJwt(),
     channelId,
   };
+});
+
+/**
+ * Quem está em cada canal, inclusive nos que você não entrou.
+ * Serve a lista da sidebar — ver presence.ts.
+ */
+app.get('/api/presence', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return;
+  return { channels: await presence() };
 });
 
 app.get('/api/messages', async (req, reply) => {

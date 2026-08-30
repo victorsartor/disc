@@ -1,0 +1,189 @@
+import type { FastifyInstance } from 'fastify';
+import { nanoid } from 'nanoid';
+import { config } from './config.js';
+import { userFromRequest } from './auth.js';
+import { rateLimit } from './ratelimit.js';
+import {
+  findUserById, saveImage, deleteImage, loadImage,
+  setAvatar, setBanner, patchProfile, type User,
+} from './db.js';
+
+export const MAX_BIO_LENGTH = 300;
+export const MAX_STATUS_LENGTH = 60;
+
+/** Teto do arquivo já decodificado. O cliente redimensiona antes de mandar;
+ *  isto é a rede de segurança contra quem falar com a API na mão. */
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+
+// Só formatos que todo navegador desenha. Nada de SVG: SVG é documento, e
+// documento com <script> dentro servido do nosso domínio é XSS de graça.
+const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+const DATA_URL = /^data:([a-z]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/;
+
+/** Base64 gordo o bastante pra virar 3 MB depois de decodificado. */
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A identidade do LiveKit é o id do usuário — exceto a do ingress do OBS,
+ * que ganha sufixo pra não colidir com a sessão de voz. Quem clica no
+ * retângulo "(tela)" está clicando na pessoa, então desfazemos o sufixo.
+ */
+function userIdFromIdentity(identity: string): string {
+  return identity.endsWith('_obs') ? identity.slice(0, -4) : identity;
+}
+
+function imageUrl(id: string): string {
+  return `${config.publicUrl}/api/img/${id}`;
+}
+
+/** O que qualquer pessoa do servidor pode ver de qualquer outra. */
+function publicProfile(u: User) {
+  return {
+    id: u.id,
+    name: u.name,
+    avatarUrl: u.avatar_url,
+    bannerUrl: u.banner_url,
+    bio: u.bio ?? '',
+    statusText: u.status_text ?? '',
+  };
+}
+
+/** Decodifica e valida o data URL vindo do renderer. Lança em qualquer erro. */
+function decodeDataUrl(raw: unknown): { mime: string; bytes: Buffer } {
+  if (typeof raw !== 'string') throw new Error('imagem inválida');
+  const m = DATA_URL.exec(raw);
+  if (!m) throw new Error('imagem inválida');
+
+  const mime = m[1].toLowerCase();
+  if (!ALLOWED_MIME.has(mime)) throw new Error('formato não suportado');
+
+  const bytes = Buffer.from(m[2], 'base64');
+  if (bytes.length === 0) throw new Error('imagem vazia');
+  if (bytes.length > MAX_IMAGE_BYTES) throw new Error('imagem muito grande');
+
+  return { mime, bytes };
+}
+
+/** Se a URL antiga apontava pro nosso próprio /api/img, devolve o id dela. */
+function ownImageId(url: string | null): string | null {
+  if (!url) return null;
+  const prefix = `${config.publicUrl}/api/img/`;
+  return url.startsWith(prefix) ? url.slice(prefix.length) : null;
+}
+
+export function registerProfileRoutes(app: FastifyInstance): void {
+  /**
+   * Bytes da imagem, sem sessão.
+   *
+   * É uma tag <img> do renderer que busca isto, e tag não manda header de
+   * autorização. O que protege é o id: 21 caracteres aleatórios por imagem,
+   * do mesmo jeito que a URL do avatar do Google — mais o fato de o servidor
+   * inteiro só existir dentro da tailnet.
+   */
+  app.get('/api/img/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const img = loadImage(id);
+    if (!img) return reply.code(404).send({ error: 'imagem inexistente' });
+
+    return reply
+      .header('content-type', img.mime)
+      // O id muda toda vez que a imagem muda, então o conteúdo de uma URL
+      // nunca muda: dá pra guardar pra sempre.
+      .header('cache-control', 'public, max-age=31536000, immutable')
+      .send(img.bytes);
+  });
+
+  /** Perfil de qualquer um — é o que abre ao clicar numa pessoa. */
+  app.get('/api/users/:identity', async (req, reply) => {
+    const me = await userFromRequest(req);
+    if (!me) return reply.code(401).send({ error: 'não autenticado' });
+
+    const { identity } = req.params as { identity: string };
+    const user = findUserById(userIdFromIdentity(identity));
+    if (!user) return reply.code(404).send({ error: 'pessoa inexistente' });
+
+    return { user: publicProfile(user) };
+  });
+
+  /** Texto do próprio perfil: recado e "sobre mim". */
+  app.patch('/api/me/profile', async (req, reply) => {
+    const me = await userFromRequest(req);
+    if (!me) return reply.code(401).send({ error: 'não autenticado' });
+
+    if (!rateLimit(`profile:${me.id}`, 30, 60_000)) {
+      return reply.code(429).send({ error: 'devagar aí' });
+    }
+
+    const { bio, statusText } = (req.body ?? {}) as {
+      bio?: unknown;
+      statusText?: unknown;
+    };
+
+    const patch: { bio?: string; statusText?: string } = {};
+
+    if (bio !== undefined) {
+      if (typeof bio !== 'string') return reply.code(400).send({ error: 'bio inválida' });
+      patch.bio = bio.trim().slice(0, MAX_BIO_LENGTH);
+    }
+    if (statusText !== undefined) {
+      if (typeof statusText !== 'string') {
+        return reply.code(400).send({ error: 'recado inválido' });
+      }
+      // Uma linha só: quebra de linha aqui vira layout torto na sidebar.
+      patch.statusText = statusText.replace(/\s+/g, ' ').trim().slice(0, MAX_STATUS_LENGTH);
+    }
+
+    return { user: publicProfile(patchProfile(me.id, patch)) };
+  });
+
+  // Foto e capa compartilham tudo menos a coluna que gravam.
+  for (const kind of ['avatar', 'banner'] as const) {
+    app.post(
+      `/api/me/${kind}`,
+      { bodyLimit: MAX_BODY_BYTES },
+      async (req, reply) => {
+        const me = await userFromRequest(req);
+        if (!me) return reply.code(401).send({ error: 'não autenticado' });
+
+        if (!rateLimit(`img:${me.id}`, 20, 60_000)) {
+          return reply.code(429).send({ error: 'devagar aí' });
+        }
+
+        const { dataUrl } = (req.body ?? {}) as { dataUrl?: unknown };
+        const antiga = kind === 'avatar' ? me.avatar_url : me.banner_url;
+
+        // null limpa: a capa some, a foto volta pra do Google.
+        if (dataUrl === null) {
+          const user = kind === 'avatar'
+            ? setAvatar(me.id, me.google_avatar_url, false)
+            : setBanner(me.id, null);
+          const velha = ownImageId(antiga);
+          if (velha) deleteImage(velha);
+          return { user: publicProfile(user) };
+        }
+
+        let img: { mime: string; bytes: Buffer };
+        try {
+          img = decodeDataUrl(dataUrl);
+        } catch (err) {
+          return reply.code(400).send({ error: (err as Error).message });
+        }
+
+        const id = nanoid();
+        saveImage(id, img.mime, img.bytes);
+
+        const user = kind === 'avatar'
+          ? setAvatar(me.id, imageUrl(id), true)
+          : setBanner(me.id, imageUrl(id));
+
+        // Só depois de a nova estar gravada e apontada. Se algo explodir no
+        // meio, o pior caso é uma imagem órfã — não um perfil sem foto.
+        const velha = ownImageId(antiga);
+        if (velha) deleteImage(velha);
+
+        return { user: publicProfile(user) };
+      },
+    );
+  }
+}
