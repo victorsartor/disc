@@ -1,0 +1,30 @@
+# Caddy usando o certificado emitido pelo proprio Tailscale.
+# Diferenca pro Caddyfile normal: nao pede certificado ao Let's Encrypt
+# (o desafio HTTP-01 nao teria como chegar aqui atras do CGNAT).
+{$DOMAIN} {
+	tls /certs/tailscale.crt /certs/tailscale.key
+
+	encode zstd gzip
+
+	handle /rtc* {
+		reverse_proxy livekit:7880
+	}
+
+	handle /twirp* {
+		reverse_proxy livekit:7880
+	}
+
+	handle /whip* {
+		reverse_proxy ingress:8080
+	}
+
+	handle {
+		reverse_proxy server:3000
+	}
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}

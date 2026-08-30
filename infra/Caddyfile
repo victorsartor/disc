@@ -1,0 +1,30 @@
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Sinalização WebSocket do LiveKit
+	handle /rtc* {
+		reverse_proxy livekit:7880
+	}
+
+	# API interna do LiveKit (Twirp)
+	handle /twirp* {
+		reverse_proxy livekit:7880
+	}
+
+	# Endpoint WHIP — é aqui que o OBS publica
+	handle /whip* {
+		reverse_proxy ingress:8080
+	}
+
+	# Todo o resto vai pro backend (auth, chat, tokens)
+	handle {
+		reverse_proxy server:3000
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}

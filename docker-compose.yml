@@ -1,0 +1,70 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [server, livekit]
+
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./infra/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      # Porta UDP única (mux) — só esta precisa abrir no firewall da VM
+      - "7882:7882/udp"
+      # Fallback TCP para redes que bloqueiam UDP
+      - "7881:7881/tcp"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no
+    volumes:
+      - redis_data:/data
+
+  # Ingress WHIP — recebe o stream do OBS com NVENC
+  ingress:
+    image: livekit/ingress:latest
+    restart: unless-stopped
+    environment:
+      INGRESS_CONFIG_BODY: |
+        redis:
+          address: redis:6379
+        api_key: ${LIVEKIT_API_KEY}
+        api_secret: ${LIVEKIT_API_SECRET}
+        ws_url: ws://livekit:7880
+        whip_port: 8080
+        rtc_config:
+          udp_port: 7885
+          use_external_ip: true
+    ports:
+      - "7885:7885/udp"
+    depends_on: [redis, livekit]
+
+  server:
+    build: ./server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /data/disc.db
+      LIVEKIT_HOST: http://livekit:7880
+    volumes:
+      - server_data:/data
+
+volumes:
+  caddy_data:
+  caddy_config:
+  redis_data:
+  server_data:

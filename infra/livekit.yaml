@@ -1,0 +1,19 @@
+port: 7880
+
+rtc:
+  # Porta UDP única (mux) em vez de faixa 50000-60000.
+  # Muito mais simples de liberar no firewall da Oracle Cloud.
+  udp_port: 7882
+  tcp_port: 7881
+  use_external_ip: true
+
+# Sem Redis aqui: nó único, estado em memória.
+# O Redis do compose serve apenas ao ingress (WHIP).
+
+logging:
+  level: info
+
+room:
+  # Sala some sozinha 5min depois do último sair
+  empty_timeout: 300
+  max_participants: 20

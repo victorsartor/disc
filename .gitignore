@@ -1,0 +1,35 @@
+# Segredos — NUNCA commitar
+.env
+*.env
+.env.*
+# ...menos os modelos, que são só estrutura sem valor nenhum dentro
+!.env.example
+!.env.*.example
+
+# Notas locais — não fazem parte do que roda.
+# Para versionar alguma delas depois, é só apagar a linha aqui.
+README.md
+DESIGN.md
+cores.md
+Gemini_Generated_Image_*.jpg
+
+# Dados
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Dependências e builds
+node_modules/
+dist/
+dist-electron/
+release/
+.vite/
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.log
+
+# Certificados gerados pelo Tailscale — contêm chave privada
+certs/

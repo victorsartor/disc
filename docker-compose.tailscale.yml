@@ -1,0 +1,71 @@
+# Servidor no seu PC, alcancavel pela tailnet. Resolve CGNAT sem depender
+# do provedor e sem redirecionar porta nenhuma no roteador.
+#
+#   .\preparar-tailscale.ps1      (uma vez, gera cert e mostra os valores)
+#   docker compose -f docker-compose.tailscale.yml up -d
+#
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./infra/Caddyfile.tailscale:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [server, livekit]
+
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    # --node-ip e o que faz o LiveKit anunciar o endereco da tailnet
+    command: --config /etc/livekit.yaml --node-ip ${TAILSCALE_IP}
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./infra/livekit.tailscale.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7882:7882/udp"
+      - "7881:7881/tcp"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no
+
+  ingress:
+    image: livekit/ingress:latest
+    restart: unless-stopped
+    environment:
+      INGRESS_CONFIG_BODY: |
+        redis:
+          address: redis:6379
+        api_key: ${LIVEKIT_API_KEY}
+        api_secret: ${LIVEKIT_API_SECRET}
+        ws_url: ws://livekit:7880
+        whip_port: 8080
+        rtc_config:
+          udp_port: 7885
+          use_external_ip: false
+          node_ip: ${TAILSCALE_IP}
+    ports:
+      - "7885:7885/udp"
+    depends_on: [redis, livekit]
+
+  server:
+    build: ./server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /data/disc.db
+    volumes:
+      - server_data:/data
+
+volumes:
+  caddy_data:
+  caddy_config:
+  server_data:

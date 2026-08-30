@@ -1,0 +1,16 @@
+# Config de LiveKit para teste local. Diferenca principal pro producao:
+# use_external_ip desligado, porque aqui tudo acontece em 127.0.0.1 e a
+# deteccao de IP externo so atrapalharia.
+port: 7880
+
+rtc:
+  udp_port: 7882
+  tcp_port: 7881
+  use_external_ip: false
+
+logging:
+  level: info
+
+room:
+  empty_timeout: 300
+  max_participants: 20
