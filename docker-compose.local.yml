@@ -4,10 +4,21 @@
 #
 #   docker compose -f docker-compose.local.yml up -d
 #
+# Teto para os logs. O driver json-file do Docker nao tem limite nenhum por
+# padrao: o LiveKit sozinho escreve ~13 MB por dia so com a sala parada, e
+# isso cresceria pra sempre dentro do disco virtual. 10 MB x 3 arquivos por
+# container e historico de sobra pra investigar qualquer coisa.
+x-logging: &log
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   livekit:
     image: livekit/livekit-server:latest
     restart: unless-stopped
+    logging: *log
     command: --config /etc/livekit.yaml
     environment:
       LIVEKIT_KEYS: "devkey: devsecret_apenas_local_nao_use_em_producao"
@@ -20,6 +31,7 @@ services:
   server:
     build: ./server
     restart: unless-stopped
+    logging: *log
     env_file: .env.local
     environment:
       DB_PATH: /data/disc.db

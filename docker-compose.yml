@@ -1,7 +1,18 @@
+# Teto para os logs. O driver json-file do Docker nao tem limite nenhum por
+# padrao: o LiveKit sozinho escreve ~13 MB por dia so com a sala parada, e
+# isso cresceria pra sempre dentro do disco virtual. 10 MB x 3 arquivos por
+# container e historico de sobra pra investigar qualquer coisa.
+x-logging: &log
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *log
     ports:
       - "80:80"
       - "443:443"
@@ -16,6 +27,7 @@ services:
   livekit:
     image: livekit/livekit-server:latest
     restart: unless-stopped
+    logging: *log
     command: --config /etc/livekit.yaml
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
@@ -30,6 +42,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *log
     command: redis-server --save "" --appendonly no
     volumes:
       - redis_data:/data
@@ -38,6 +51,7 @@ services:
   ingress:
     image: livekit/ingress:latest
     restart: unless-stopped
+    logging: *log
     environment:
       INGRESS_CONFIG_BODY: |
         redis:
@@ -56,6 +70,7 @@ services:
   server:
     build: ./server
     restart: unless-stopped
+    logging: *log
     env_file: .env
     environment:
       DB_PATH: /data/disc.db
