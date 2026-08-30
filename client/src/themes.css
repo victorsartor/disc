@@ -1,0 +1,127 @@
+/* ── Os quatro temas ──────────────────────────────────────────────────────
+   O theme.css inteiro pinta por variável, então trocar de tema é trocar
+   estas declarações — não há regra de componente aqui embaixo.
+
+   Cada bloco redefine TODOS os níveis, mesmo os que o :root deriva de outra
+   variável (--level-1 sai de --ink lá). Derivar aqui amarraria dois papéis
+   diferentes ao mesmo valor, e no tema claro eles se separam: --ink deixa de
+   ser fundo e passa a ser o texto que vai POR CIMA das cores fortes.
+
+   Os seletores têm especificidade maior que o :root do theme.css, então
+   ganham independente da ordem em que os dois arquivos entrarem.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* ── Abissal — Ink Black (padrão) ─────────────────────────────────────── */
+:root[data-theme="abissal"] {
+  --ink: #0d1b2a;
+  --prussian: #1b263b;
+  --dusk: #415a77;
+  --lavender: #778da9;
+  --alabaster: #e0e1dd;
+
+  --accent: #4cc9c0;
+  --accent-dim: rgba(76, 201, 192, 0.14);
+  --accent-glow: rgba(76, 201, 192, 0.3);
+  --danger: #e5484d;
+  --live: #e8a33d;
+
+  --level-0: #0a1521;
+  --level-1: #0d1b2a;
+  --level-2: #1b263b;
+  --level-3: #22304a;
+  --glass: rgba(65, 90, 119, 0.2);
+
+  --line: rgba(65, 90, 119, 0.3);
+  --line-strong: rgba(65, 90, 119, 0.55);
+  --hover: rgba(119, 141, 169, 0.07);
+
+  color-scheme: dark;
+}
+
+/* ── Prussiano — Prussian Blue ────────────────────────────────────────── */
+:root[data-theme="prussiano"] {
+  --ink: #06121f;
+  --prussian: #1f2d49;
+  --dusk: #4d6a92;
+  --lavender: #8aa0bd;
+  --alabaster: #e6e9ee;
+
+  --accent: #5fd0e8;
+  --accent-dim: rgba(95, 208, 232, 0.14);
+  --accent-glow: rgba(95, 208, 232, 0.32);
+  --danger: #ef5f63;
+  --live: #f0ae4b;
+
+  --level-0: #101c2e;
+  --level-1: #16223a;
+  --level-2: #1f2d49;
+  --level-3: #2b3c5e;
+  --glass: rgba(77, 106, 146, 0.22);
+
+  --line: rgba(77, 106, 146, 0.36);
+  --line-strong: rgba(77, 106, 146, 0.6);
+  --hover: rgba(138, 160, 189, 0.08);
+
+  color-scheme: dark;
+}
+
+/* ── Crepúsculo — Dusk Blue ───────────────────────────────────────────── */
+:root[data-theme="crepusculo"] {
+  --ink: #10192a;
+  --prussian: #27354a;
+  --dusk: #5b7ba1;
+  --lavender: #9db2cc;
+  --alabaster: #eef1f5;
+
+  --accent: #9ec5ff;
+  --accent-dim: rgba(158, 197, 255, 0.15);
+  --accent-glow: rgba(158, 197, 255, 0.34);
+  --danger: #f4676b;
+  --live: #f5b95c;
+
+  --level-0: #17202c;
+  --level-1: #1e2937;
+  --level-2: #27354a;
+  --level-3: #374966;
+  --glass: rgba(91, 123, 161, 0.24);
+
+  --line: rgba(91, 123, 161, 0.4);
+  --line-strong: rgba(91, 123, 161, 0.65);
+  --hover: rgba(157, 178, 204, 0.09);
+
+  color-scheme: dark;
+}
+
+/* ── Ártico — Alabaster (claro) ───────────────────────────────────────────
+   O único que inverte. --alabaster vira o texto escuro e --ink vira o claro
+   que vai por cima de accent e live, que aqui são fundos fortes. Os dois
+   trocam de lado justamente porque o theme.css sempre os usou como par
+   "fundo x texto por cima", nunca como uma cor literal.
+   ──────────────────────────────────────────────────────────────────────── */
+:root[data-theme="artico"] {
+  --ink: #ffffff;
+  --prussian: #e9edf2;
+  --dusk: #94a7bd;
+  --lavender: #5c7085;
+  --alabaster: #16212e;
+
+  --accent: #0d7d75;
+  --accent-dim: rgba(13, 125, 117, 0.12);
+  --accent-glow: rgba(13, 125, 117, 0.28);
+  --danger: #c62b30;
+  /* Escurecido de propósito: a etiqueta "AO VIVO" escreve em --ink, que aqui
+     é branco. O âmbar original não sustentaria texto branco por cima. */
+  --live: #a9631a;
+
+  --level-0: #eef1f4;
+  --level-1: #ffffff;
+  --level-2: #f6f8fa;
+  --level-3: #e4e9ef;
+  --glass: rgba(255, 255, 255, 0.65);
+
+  --line: rgba(90, 115, 145, 0.24);
+  --line-strong: rgba(90, 115, 145, 0.45);
+  --hover: rgba(60, 90, 120, 0.06);
+
+  color-scheme: light;
+}

@@ -16,11 +16,30 @@ const api = {
     },
   },
 
+  update: {
+    state: () => ipcRenderer.invoke('update:state'),
+    skip: (): Promise<void> => ipcRenderer.invoke('update:skip'),
+    version: (): Promise<string> => ipcRenderer.invoke('app:version'),
+    onState: (cb: (state: unknown) => void) => {
+      const h = (_e: unknown, v: unknown) => cb(v);
+      ipcRenderer.on('update:state', h);
+      return () => ipcRenderer.off('update:state', h);
+    },
+  },
+
   me: () => ipcRenderer.invoke('api:me'),
   messages: () => ipcRenderer.invoke('api:messages'),
+  presence: () => ipcRenderer.invoke('api:presence'),
   sendMessage: (body: string) => ipcRenderer.invoke('api:send-message', body),
   roomToken: (channelId: string) => ipcRenderer.invoke('api:room-token', channelId),
   whipConfig: (channelId: string) => ipcRenderer.invoke('api:whip-config', channelId),
+
+  profile: {
+    of: (identity: string) => ipcRenderer.invoke('api:user', identity),
+    patch: (patch: unknown) => ipcRenderer.invoke('api:profile-patch', patch),
+    image: (kind: 'avatar' | 'banner', dataUrl: string | null) =>
+      ipcRenderer.invoke('api:profile-image', kind, dataUrl),
+  },
 
   screenSources: () => ipcRenderer.invoke('screen:sources'),
 
@@ -35,6 +54,8 @@ const api = {
       ipcRenderer.invoke('settings:resolve-key', code, printable),
     setVolume: (identity: string, volume: number) =>
       ipcRenderer.invoke('settings:set-volume', identity, volume),
+    setScreenVolume: (identity: string, volume: number) =>
+      ipcRenderer.invoke('settings:set-screen-volume', identity, volume),
   },
 
   overlay: {

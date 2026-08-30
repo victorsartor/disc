@@ -31,6 +31,30 @@ export interface ScreenFeed {
 }
 
 /**
+ * Faixa de audio que chega de outra pessoa - microfone ou audio da tela.
+ *
+ * O livekit-client NAO toca audio sozinho: ele entrega a faixa e para por
+ * ai. Quem nao anexa a um <audio> nunca ouve nada. Por isso as faixas viram
+ * estado aqui e o RoomAudio as anexa, do mesmo jeito que o Stage faz com o
+ * video da tela.
+ */
+export interface AudioFeed {
+  /** sid da publicacao: unico por faixa, e uma pessoa pode ter duas. */
+  sid: string;
+  identity: string;
+  /**
+   * Duas trilhas separadas, de proposito.
+   *
+   * 'voice' e o microfone da pessoa; 'screen' e o som do que ela esta
+   * compartilhando. Ensurdecer derruba so a primeira, e cada uma tem seu
+   * proprio volume - senao abaixar a voz de alguem abaixaria junto o jogo
+   * que ele esta transmitindo.
+   */
+  kind: 'voice' | 'screen';
+  track: RemoteTrack;
+}
+
+/**
  * Qualidade de tela. Estes tres ajustes sao o que separa
  * "tela boa" de "tela do Discord":
  *   - VP9 rende muito mais que VP8 no mesmo bitrate para conteudo de tela
@@ -73,6 +97,9 @@ export function useRoom(onChatMessage: (m: Message) => void) {
   const [connecting, setConnecting] = useState(false);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [screens, setScreens] = useState<ScreenFeed[]>([]);
+  const [audios, setAudios] = useState<AudioFeed[]>([]);
+  /** identity -> volume do som da tela daquela pessoa. */
+  const [screenVolumes, setScreenVolumes] = useState<Record<string, number>>({});
   const [micWanted, setMicWanted] = useState(true);
   const [pttDown, setPttDown] = useState(false);
   const [deafened, setDeafened] = useState(false);
@@ -84,6 +111,7 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     void window.disc.settings.get().then((s) => {
       settingsRef.current = s;
       setSettings(s);
+      setScreenVolumes(s.screenVolumes ?? {});
       setMicWanted(s.voiceMode === 'vad');
     });
   }, []);
@@ -164,6 +192,7 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     setChannelId(null);
     setPeers([]);
     setScreens([]);
+    setAudios([]);
     setSharing(false);
   }, []);
 
@@ -199,13 +228,23 @@ export function useRoom(onChatMessage: (m: Message) => void) {
 
         room
           .on(RoomEvent.ParticipantConnected, (p: RemoteParticipant) => {
-            // Volume salvo daquela pessoa volta a valer assim que ela entra
+            // Volumes salvos daquela pessoa voltam a valer assim que ela entra.
+            // Sao dois, um por trilha: a voz dela e o som da tela dela.
             const vol = settingsRef.current?.volumes[p.identity];
-            if (vol !== undefined && vol !== 1) p.setVolume(vol);
+            if (vol !== undefined && vol !== 1) {
+              p.setVolume(vol, Track.Source.Microphone);
+            }
+            const svol = settingsRef.current?.screenVolumes[p.identity];
+            if (svol !== undefined && svol !== 1) {
+              p.setVolume(svol, Track.Source.ScreenShareAudio);
+            }
             // Quem entra durante o ensurdecido tambem precisa vir mudo,
-            // senao a proxima pessoa a chegar fura o silencio.
+            // senao a proxima pessoa a chegar fura o silencio. So o microfone:
+            // o som da tela nao e afetado por ensurdecer.
             if (deafenedRef.current) {
-              p.audioTrackPublications.forEach((pub) => pub.setEnabled(false));
+              p.audioTrackPublications.forEach((pub) => {
+                if (pub.source === Track.Source.Microphone) pub.setEnabled(false);
+              });
             }
             playJoin();
             // Quem chegou nao tem como saber que voce esta ensurdecido:
@@ -229,6 +268,7 @@ export function useRoom(onChatMessage: (m: Message) => void) {
             setChannelId(null);
             setPeers([]);
             setScreens([]);
+            setAudios([]);
             setSharing(false);
           })
           .on(RoomEvent.DataReceived, (payload: Uint8Array, from?: RemoteParticipant) => {
@@ -249,8 +289,22 @@ export function useRoom(onChatMessage: (m: Message) => void) {
             (track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
               // Cobre quem ja estava na sala quando voce entrou ensurdecido,
               // e quem liga o mic depois. O ParticipantConnected sozinho nao
-              // pega esses dois casos.
-              if (deafenedRef.current && track.kind === 'audio') pub.setEnabled(false);
+              // pega esses dois casos. So microfone: som de tela passa.
+              if (deafenedRef.current && pub.source === Track.Source.Microphone) {
+                pub.setEnabled(false);
+              }
+
+              // Microfone E audio de tela caem aqui: os dois sao kind 'audio'
+              // e os dois precisam ser anexados pra sair som. O kind separa
+              // quem responde a ensurdecer e a qual controle de volume.
+              if (track.kind === 'audio') {
+                const kind =
+                  pub.source === Track.Source.ScreenShareAudio ? 'screen' : 'voice';
+                setAudios((prev) => [
+                  ...prev.filter((a) => a.sid !== pub.trackSid),
+                  { sid: pub.trackSid, identity: participant.identity, kind, track },
+                ]);
+              }
 
               if (track.source === Track.Source.ScreenShare) {
                 setScreens((prev) => [
@@ -261,14 +315,33 @@ export function useRoom(onChatMessage: (m: Message) => void) {
               syncPeers();
             },
           )
-          .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+          .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, pub: RemoteTrackPublication) => {
+            if (track.kind === 'audio') {
+              setAudios((prev) => prev.filter((a) => a.sid !== pub.trackSid));
+            }
             if (track.source === Track.Source.ScreenShare) {
               setScreens((prev) => prev.filter((s) => s.track !== track));
             }
             syncPeers();
+          })
+          // O Chromium pode recusar o autoplay do audio. Aqui sempre existe um
+          // clique antes (entrar no canal), entao o normal e nunca disparar -
+          // mas se disparar, sem isto a sala fica muda em silencio.
+          .on(RoomEvent.AudioPlaybackStatusChanged, () => {
+            if (!room.canPlaybackAudio) {
+              void room.startAudio().catch(() => {
+                setError('o navegador bloqueou o audio - clique em qualquer lugar');
+              });
+            }
           });
 
         await room.connect(url, token);
+
+        // Entrar no canal e um clique, entao o gesto do usuario ainda vale
+        // aqui - que e a condicao pro Chromium liberar o autoplay do audio.
+        await room.startAudio().catch(() => {
+          /* o AudioPlaybackStatusChanged cobre se ainda assim bloquear */
+        });
 
         // Em PTT o microfone comeca fechado e so abre com a tecla presa.
         const startMuted = settingsRef.current?.voiceMode === 'ptt';
@@ -308,8 +381,13 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     const room = roomRef.current;
     if (!room) return;
     const next = !deafened;
+    // SO o microfone. Antes isto derrubava todas as faixas de audio da pessoa,
+    // e o som da tela dela ia junto: ensurdecer pra nao ouvir o amigo calava
+    // tambem o jogo que ele estava transmitindo.
     room.remoteParticipants.forEach((p) =>
-      p.audioTrackPublications.forEach((pub) => pub.setEnabled(!next)),
+      p.audioTrackPublications.forEach((pub) => {
+        if (pub.source === Track.Source.Microphone) pub.setEnabled(!next);
+      }),
     );
     // Ensurdecer implica calar: caso classico de nao querer falar sozinho.
     // Ao desensurdecer, o microfone volta como estava antes.
@@ -325,14 +403,37 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     syncPeers();
   }, [deafened, micWanted, syncPeers, announceState]);
 
-  /** Volume individual por pessoa (0 a 2), persistido entre sessoes. */
+  /**
+   * Volume da VOZ de uma pessoa (0 a 2), persistido entre sessoes.
+   *
+   * O source explicito nao e decoracao: o setVolume do LiveKit tem
+   * Microphone como padrao, e deixar implicito escondia que existe uma
+   * segunda trilha logo abaixo mexendo na mesma pessoa.
+   */
   const setPeerVolume = useCallback((identity: string, volume: number) => {
-    roomRef.current?.remoteParticipants.get(identity)?.setVolume(volume);
+    roomRef.current
+      ?.remoteParticipants.get(identity)
+      ?.setVolume(volume, Track.Source.Microphone);
     void window.disc.settings.setVolume(identity, volume);
     if (settingsRef.current) {
       settingsRef.current.volumes = { ...settingsRef.current.volumes, [identity]: volume };
     }
     setPeers((prev) => prev.map((p) => (p.identity === identity ? { ...p, volume } : p)));
+  }, []);
+
+  /** Volume do SOM DA TELA de uma pessoa (0 a 1), independente da voz dela. */
+  const setScreenVolume = useCallback((identity: string, volume: number) => {
+    roomRef.current
+      ?.remoteParticipants.get(identity)
+      ?.setVolume(volume, Track.Source.ScreenShareAudio);
+    void window.disc.settings.setScreenVolume(identity, volume);
+    if (settingsRef.current) {
+      settingsRef.current.screenVolumes = {
+        ...settingsRef.current.screenVolumes,
+        [identity]: volume,
+      };
+    }
+    setScreenVolumes((prev) => ({ ...prev, [identity]: volume }));
   }, []);
 
   // --- Compartilhamento de tela ------------------------------------------
@@ -432,9 +533,9 @@ export function useRoom(onChatMessage: (m: Message) => void) {
   useEffect(() => () => void roomRef.current?.disconnect(), []);
 
   return {
-    settings, channelId, connecting, peers, screens,
+    settings, channelId, connecting, peers, screens, audios, screenVolumes,
     micOn: micLive, micWanted, pttDown, deafened, sharing, error,
-    connect, disconnect, toggleMic, toggleDeafen, setPeerVolume,
+    connect, disconnect, toggleMic, toggleDeafen, setPeerVolume, setScreenVolume,
     startShare, stopShare, broadcastChat, updateSettings,
   };
 }

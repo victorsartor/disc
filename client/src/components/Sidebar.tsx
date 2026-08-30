@@ -1,16 +1,40 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Channel, Me } from '../types';
+import type { Channel, Me, Presence } from '../types';
 import type { Peer } from '../lib/useRoom';
 import {
   IconSpeaker, IconMic, IconMicOff, IconHeadphones,
   IconHeadphonesOff, IconLeave, IconSettings,
 } from './Icons';
+import { Avatar } from './Profile';
+import logo from '../assets/logo.png';
+
+/**
+ * Uma linha de participante, venha ela de onde vier.
+ *
+ * O canal em que você está entrega dados ao vivo pela própria sala; os
+ * outros vêm do servidor a cada poucos segundos e sabem menos — não há como
+ * saber quem está falando numa sala em que você não entrou. `live` é o que
+ * distingue os dois, e é o que decide se a linha aceita ajuste de volume.
+ */
+interface Row {
+  identity: string;
+  name: string;
+  avatarUrl: string | null;
+  isMuted: boolean;
+  isSharing: boolean;
+  isSpeaking: boolean;
+  isDeafened: boolean;
+  isLocal: boolean;
+  volume: number;
+  live: boolean;
+}
 
 interface Props {
   me: Me;
   channels: Channel[];
   activeChannel: string | null;
   peers: Peer[];
+  presence: Presence;
   connecting: boolean;
   micOn: boolean;
   deafened: boolean;
@@ -22,12 +46,15 @@ interface Props {
   onToggleDeafen: () => void;
   onVolumeChange: (identity: string, volume: number) => void;
   onOpenSettings: () => void;
+  onOpenProfile: () => void;
+  /** Abre o perfil de quem foi clicado — inclusive o seu. */
+  onOpenUser: (identity: string) => void;
 }
 
 export function Sidebar({
-  me, channels, activeChannel, peers, connecting, micOn, deafened,
+  me, channels, activeChannel, peers, presence, connecting, micOn, deafened,
   pttMode, pttDown, onJoin, onLeave, onToggleMic, onToggleDeafen,
-  onVolumeChange, onOpenSettings,
+  onVolumeChange, onOpenSettings, onOpenProfile, onOpenUser,
 }: Props) {
   const status = connecting
     ? 'conectando...'
@@ -40,8 +67,8 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
-        <span className="sidebar__dot" />
-        Concord
+        <img className="sidebar__logo" src={logo} alt="" />
+        Disneia
       </div>
 
       <div className="sidebar__scroll">
@@ -49,7 +76,19 @@ export function Sidebar({
 
         {channels.map((ch) => {
           const active = activeChannel === ch.id;
-          const members = active ? peers : [];
+          // No canal em que você está, a sala é a fonte da verdade e chega
+          // na hora. Nos outros, o que o servidor viu por último.
+          const members: Row[] = active
+            ? peers.map((p) => ({ ...p, live: true }))
+            : (presence[ch.id] ?? []).map((m) => ({
+                ...m,
+                isSpeaking: false,
+                isDeafened: false,
+                isLocal: false,
+                volume: 1,
+                live: false,
+              }));
+
           return (
             <div key={ch.id} className={`channel${active ? ' channel--active' : ''}`}>
               <button className="channel__head" onClick={() => onJoin(ch.id)} disabled={connecting}>
@@ -60,8 +99,13 @@ export function Sidebar({
 
               {members.length > 0 && (
                 <div className="channel__members">
-                  {members.map((p) => (
-                    <MemberRow key={p.identity} peer={p} onVolumeChange={onVolumeChange} />
+                  {members.map((m) => (
+                    <MemberRow
+                      key={m.identity}
+                      row={m}
+                      onVolumeChange={onVolumeChange}
+                      onOpenUser={onOpenUser}
+                    />
                   ))}
                 </div>
               )}
@@ -73,15 +117,19 @@ export function Sidebar({
       {/* Nome numa linha e controles na outra: com quatro botoes numa coluna
           de 240px, tudo na mesma linha sobrava uma letra pro nome. */}
       <div className="userbar">
-        <div className="userbar__id">
-          <img className="userbar__avatar" src={me.avatarUrl ?? undefined} alt="" referrerPolicy="no-referrer" />
+        <button
+          className="userbar__id userbar__id--botao"
+          onClick={onOpenProfile}
+          title="Seu perfil"
+        >
+          <Avatar url={me.avatarUrl} name={me.name} size={32} />
           <div className="userbar__info">
             <div className="userbar__name">{me.name}</div>
             <div className={`userbar__status${activeChannel ? ' userbar__status--connected' : ''}`}>
               {status}
             </div>
           </div>
-        </div>
+        </button>
 
         <div className="userbar__actions">
           <button
@@ -118,14 +166,20 @@ export function Sidebar({
 }
 
 function MemberRow({
-  peer,
+  row,
   onVolumeChange,
+  onOpenUser,
 }: {
-  peer: Peer;
+  row: Row;
   onVolumeChange: (identity: string, volume: number) => void;
+  onOpenUser: (identity: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  // Ajustar volume exige a faixa de áudio em mãos, e ela só existe no canal
+  // em que você está. Fora dele a linha é só informativa.
+  const adjustable = row.live && !row.isLocal;
 
   useEffect(() => {
     if (!open) return;
@@ -139,34 +193,45 @@ function MemberRow({
   return (
     <div className="member-wrap" ref={ref}>
       <div
-        className={`member${peer.isSpeaking ? ' member--speaking' : ''}`}
-        title={peer.isLocal ? peer.name : `${peer.name} — botão direito para o volume`}
+        className={`member${row.isSpeaking ? ' member--speaking' : ''}${row.live ? '' : ' member--away'}`}
+        role="button"
+        tabIndex={0}
+        title={adjustable ? `${row.name} — botão direito para o volume` : row.name}
+        onClick={() => onOpenUser(row.identity)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onOpenUser(row.identity);
+          }
+        }}
         onContextMenu={(e) => {
-          if (peer.isLocal) return;
+          if (!adjustable) return;
           e.preventDefault();
           setOpen((v) => !v);
         }}
       >
-        <img className="member__avatar" src={peer.avatarUrl ?? undefined} alt="" referrerPolicy="no-referrer" />
-        <span className="member__name">{peer.name}</span>
-        {peer.isSharing && <span className="member__tag member__tag--live">AO VIVO</span>}
-        {peer.isMuted && (
+        <Avatar url={row.avatarUrl} name={row.name} size={24} className="member__avatar" />
+        <span className="member__name">{row.name}</span>
+        {row.isSharing && <span className="member__tag member__tag--live">AO VIVO</span>}
+        {row.isMuted && (
           <span className="member__icon--muted" title="Microfone desligado">
             <IconMicOff size={13} />
           </span>
         )}
-        {peer.isDeafened && (
+        {row.isDeafened && (
           <span className="member__icon--muted" title="Não está ouvindo ninguém">
             <IconHeadphonesOff size={13} />
           </span>
         )}
       </div>
 
-      {open && !peer.isLocal && (
+      {open && adjustable && (
         <div className="volume">
+          {/* "da voz" porque agora existem dois: este e o do som da tela,
+              que fica no próprio quadro da transmissão. */}
           <div className="volume__head">
-            <span>Volume</span>
-            <span className="volume__value">{Math.round(peer.volume * 100)}%</span>
+            <span>Volume da voz</span>
+            <span className="volume__value">{Math.round(row.volume * 100)}%</span>
           </div>
           <input
             type="range"
@@ -174,8 +239,8 @@ function MemberRow({
             min={0}
             max={200}
             step={5}
-            value={Math.round(peer.volume * 100)}
-            onChange={(e) => onVolumeChange(peer.identity, Number(e.target.value) / 100)}
+            value={Math.round(row.volume * 100)}
+            onChange={(e) => onVolumeChange(row.identity, Number(e.target.value) / 100)}
           />
         </div>
       )}

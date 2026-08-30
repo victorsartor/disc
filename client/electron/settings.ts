@@ -11,11 +11,15 @@ export interface Settings {
   pttKeyLabel: string;
   micDeviceId: string | null;
   speakerDeviceId: string | null;
-  /** identity -> multiplicador de volume (0 a 2) */
+  /** identity -> multiplicador de volume da VOZ (0 a 2) */
   volumes: Record<string, number>;
+  /** identity -> volume do SOM DA TELA daquela pessoa (0 a 1) */
+  screenVolumes: Record<string, number>;
   overlayEnabled: boolean;
   overlayX: number | null;
   overlayY: number | null;
+  /** Id de um dos temas em src/lib/themes.ts. Preferencia da maquina. */
+  theme: string;
 }
 
 const DEFAULTS: Settings = {
@@ -25,9 +29,11 @@ const DEFAULTS: Settings = {
   micDeviceId: null,
   speakerDeviceId: null,
   volumes: {},
+  screenVolumes: {},
   overlayEnabled: true,
   overlayX: null,
   overlayY: null,
+  theme: 'abissal',
 };
 
 let cache: Settings | null = null;
@@ -43,7 +49,15 @@ export function getSettings(): Settings {
     if (typeof raw !== 'object' || raw === null) throw new Error('formato invalido');
     // Merge raso contra os defaults: campo novo em versao nova nao quebra
     // um settings.json antigo.
-    next = { ...DEFAULTS, ...raw, volumes: { ...(raw.volumes ?? {}) } };
+    next = {
+      ...DEFAULTS,
+      ...raw,
+      // Os mapas sao clonados a parte: o spread copiaria a referencia do JSON
+      // lido, e um settings.json antigo (sem screenVolumes) deixaria o campo
+      // como undefined em vez do objeto vazio do DEFAULTS.
+      volumes: { ...(raw.volumes ?? {}) },
+      screenVolumes: { ...(raw.screenVolumes ?? {}) },
+    };
   } catch {
     next = { ...DEFAULTS };
   }
@@ -59,7 +73,8 @@ export function getSettings(): Settings {
  */
 const ALLOWED_KEYS = new Set<keyof Settings>([
   'voiceMode', 'pttKeycode', 'pttKeyLabel', 'micDeviceId',
-  'speakerDeviceId', 'volumes', 'overlayEnabled', 'overlayX', 'overlayY',
+  'speakerDeviceId', 'volumes', 'screenVolumes', 'overlayEnabled',
+  'overlayX', 'overlayY', 'theme',
 ]);
 
 export function sanitizePatch(input: unknown): Partial<Settings> {
@@ -85,4 +100,9 @@ export function patchSettings(patch: Partial<Settings>): Settings {
 export function setVolume(identity: string, volume: number): void {
   const s = getSettings();
   patchSettings({ volumes: { ...s.volumes, [identity]: volume } });
+}
+
+export function setScreenVolume(identity: string, volume: number): void {
+  const s = getSettings();
+  patchSettings({ screenVolumes: { ...s.screenVolumes, [identity]: volume } });
 }

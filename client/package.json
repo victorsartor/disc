@@ -1,7 +1,7 @@
 {
-  "name": "concord-client",
+  "name": "disneia-client",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.8.0",
   "description": "Voz, chat e compartilhamento de tela para um grupo fechado de amigos",
   "author": "Victor",
   "type": "module",
@@ -13,6 +13,7 @@
     "dist": "npm run build && electron-builder"
   },
   "dependencies": {
+    "electron-updater": "^6.3.9",
     "uiohook-napi": "^1.5.4"
   },
   "devDependencies": {
@@ -32,11 +33,11 @@
     "vite-plugin-electron-renderer": "^0.14.6"
   },
   "build": {
-    "appId": "com.concord.app",
-    "productName": "Concord",
+    "appId": "com.disneia.app",
+    "productName": "Disneia",
     "protocols": [
       {
-        "name": "Concord",
+        "name": "Disneia",
         "schemes": [
           "disc"
         ]
@@ -47,11 +48,14 @@
     },
     "npmRebuild": false,
     "electronLanguages": ["pt-BR", "en-US"],
+    "publish": {
+      "provider": "generic",
+      "url": "${env.VITE_SERVER_URL}/atualizacoes"
+    },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "node_modules/uiohook-napi/**/*",
-      "node_modules/node-gyp-build/**/*",
+      "node_modules/**/*",
       "package.json"
     ],
     "asarUnpack": [

@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Me, Message } from './types';
+import type { Me, Message, UserProfile } from './types';
 import { useRoom } from './lib/useRoom';
+import { usePresence } from './lib/usePresence';
+import { useUpdate, blocksApp } from './lib/useUpdate';
 import { Login } from './components/Login';
+import { Updater } from './components/Updater';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
+import { RoomAudio } from './components/RoomAudio';
 import { Chat } from './components/Chat';
 import { ScreenPicker } from './components/ScreenPicker';
 import { Settings } from './components/Settings';
 import { ObsSetup } from './components/ObsSetup';
+import { Profile, UserCard } from './components/Profile';
 import { IconScreen, IconBroadcast } from './components/Icons';
+import { DEFAULT_THEME, isThemeId, type ThemeId } from './lib/themes';
 
 export function App() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -17,6 +23,16 @@ export function App() {
   const [picking, setPicking] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [obsOpen, setObsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  // Identity de quem foi clicado. null = nenhum cartão aberto.
+  const [cardIdentity, setCardIdentity] = useState<string | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
+
+  const update = useUpdate();
+
+  useEffect(() => {
+    void window.disc.update.version().then(setVersion);
+  }, []);
 
   // Guarda os ids já vistos para o data channel não duplicar o que o
   // polling também trouxe (e vice-versa).
@@ -29,6 +45,51 @@ export function App() {
   }, []);
 
   const room = useRoom(addMessage);
+
+  // O tema mora nas configurações da máquina e vale pro documento inteiro:
+  // quem pinta é o CSS, a partir deste atributo no <html>.
+  const temaSalvo = room.settings?.theme;
+  const theme: ThemeId = isThemeId(temaSalvo) ? temaSalvo : DEFAULT_THEME;
+
+  const settingsCarregou = room.settings !== null;
+
+  useEffect(() => {
+    // Antes de as configurações chegarem, o valor aqui é só o padrão
+    // provisório. Aplicá-lo desfaria o que o main.tsx já pintou a partir da
+    // cópia do localStorage — o clarão que aquela cópia existe pra evitar.
+    if (!settingsCarregou) return;
+
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem('tema', theme);
+    } catch {
+      /* sem armazenamento: só perde o atalho contra o clarão */
+    }
+  }, [theme, settingsCarregou]);
+
+  const presence = usePresence(Boolean(loggedIn), room.channelId);
+
+  /**
+   * Clicar numa pessoa. Clicar em VOCÊ abre a aba de edição — é o mesmo
+   * gesto, e não faria sentido cair num cartão só de leitura do próprio
+   * perfil. O sufixo do ingress do OBS não é gente: aponta pra mesma pessoa.
+   */
+  const openUser = useCallback((identity: string) => {
+    const id = identity.endsWith('_obs') ? identity.slice(0, -4) : identity;
+    if (id === me?.id) {
+      setCardIdentity(null);
+      setProfileOpen(true);
+    } else {
+      setCardIdentity(id);
+    }
+  }, [me?.id]);
+
+  /** Perfil salvo: o nome e a foto novos precisam valer já na sidebar. */
+  const onProfileSaved = useCallback((user: UserProfile) => {
+    setMe((prev) =>
+      prev ? { ...prev, name: user.name, avatarUrl: user.avatarUrl } : prev,
+    );
+  }, []);
 
   useEffect(() => {
     void window.disc.auth.status().then(setLoggedIn);
@@ -60,7 +121,9 @@ export function App() {
     };
 
     void load();
-    const id = setInterval(load, 6000);
+    // 3s. Dentro do canal de voz o data channel entrega na hora e isto nem
+    // aparece; fora dele este intervalo É a latência do chat.
+    const id = setInterval(load, 3000);
     return () => {
       alive = false;
       clearInterval(id);
@@ -96,16 +159,23 @@ export function App() {
     else setPicking(true);
   }, [room]);
 
+  // Atualizar vem antes de tudo, inclusive do login: nao adianta entrar numa
+  // sala com uma versao que o resto do grupo ja deixou pra tras.
+  if (blocksApp(update)) return <Updater state={update} from={version} />;
+
   if (loggedIn === null) return <div className="login" />;
   if (!loggedIn || !me) return <Login />;
 
   return (
     <div className="app">
+      <RoomAudio feeds={room.audios} />
+
       <Sidebar
         me={me}
         channels={me.channels}
         activeChannel={room.channelId}
         peers={room.peers}
+        presence={presence}
         connecting={room.connecting}
         micOn={room.micOn}
         deafened={room.deafened}
@@ -117,6 +187,8 @@ export function App() {
         onToggleDeafen={room.toggleDeafen}
         onVolumeChange={room.setPeerVolume}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenProfile={() => setProfileOpen(true)}
+        onOpenUser={openUser}
       />
 
       <div className="main">
@@ -149,8 +221,13 @@ export function App() {
           )}
         </div>
 
-        <Stage screens={room.screens} />
-        <Chat messages={messages} onSend={sendChat} />
+        <Stage
+          screens={room.screens}
+          audios={room.audios}
+          screenVolumes={room.screenVolumes}
+          onScreenVolume={room.setScreenVolume}
+        />
+        <Chat messages={messages} onSend={sendChat} onOpenUser={openUser} />
       </div>
 
       {picking && (
@@ -169,6 +246,21 @@ export function App() {
           onPatch={room.updateSettings}
           onClose={() => setSettingsOpen(false)}
         />
+      )}
+
+      {profileOpen && (
+        <Profile
+          me={me}
+          theme={theme}
+          onThemeChange={(t) => void room.updateSettings({ theme: t })}
+          onSaved={onProfileSaved}
+          onClose={() => setProfileOpen(false)}
+        />
+      )}
+
+      {/* O seu perfil abre a aba de edição; o dos outros, o cartão de leitura. */}
+      {cardIdentity && (
+        <UserCard identity={cardIdentity} onClose={() => setCardIdentity(null)} />
       )}
 
       {obsOpen && room.channelId && (

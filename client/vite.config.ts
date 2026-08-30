@@ -40,7 +40,11 @@ export default defineConfig({
               // Embutido no bundle esse caminho deixa de existir e o
               // require do binding falha em runtime. Tem que ficar externo
               // (e fora do asar - ver asarUnpack no package.json).
-              external: ['uiohook-napi'],
+              //
+              // electron-updater e CommonJS com require dinamico (fs-extra,
+              // js-yaml). Empacotar isso em ESM quebra em runtime - fica
+              // externo e vai como dependencia de producao.
+              external: ['uiohook-napi', 'electron-updater'],
             },
           },
         },

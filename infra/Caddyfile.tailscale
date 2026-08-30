@@ -18,6 +18,18 @@
 		reverse_proxy ingress:8080
 	}
 
+	# Feed de atualizacao do app (latest.yml + instalador).
+	#
+	# Sem login, e nao tem como ter: o app checa atualizacao antes de existir
+	# sessao. Quem protege isto e a tailnet - de fora ninguem chega ate aqui.
+	#
+	# O file_server responde Range, que e o que o electron-updater usa pra
+	# baixar so os blocos que mudaram em vez do instalador inteiro.
+	handle_path /atualizacoes/* {
+		root * /updates
+		file_server
+	}
+
 	handle {
 		reverse_proxy server:3000
 	}

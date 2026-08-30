@@ -26,6 +26,9 @@ services:
     volumes:
       - ./infra/Caddyfile.tailscale:/etc/caddy/Caddyfile:ro
       - ./certs:/certs:ro
+      # Instalador e latest.yml que o app baixa ao abrir. Somente leitura:
+      # o Caddy nunca precisa escrever aqui, quem publica e o publicar.ps1.
+      - ./atualizacoes:/updates:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on: [server, livekit]

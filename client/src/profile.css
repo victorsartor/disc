@@ -1,0 +1,396 @@
+/* ── Perfil ──────────────────────────────────────────────────────────────
+   A aba de perfil e o cartão de quem você clica. Segue o mesmo sistema do
+   theme.css — só variável, nada de cor literal — pra que os quatro temas
+   peguem esta tela junto com o resto do app.
+   ──────────────────────────────────────────────────────────────────────── */
+.profile {
+  max-height: 100%;
+}
+
+/* Barra de ação no topo, como no DESIGN.md: sair à esquerda, título no
+   meio, confirmar à direita. Grid de três colunas iguais mantém o título
+   centrado na janela mesmo com botões de larguras diferentes. */
+.profile__bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--level-2);
+}
+
+.profile__bar .btn:first-child {
+  justify-self: start;
+}
+.profile__bar .btn:last-child {
+  justify-self: end;
+}
+
+.profile__bar-title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.profile__scroll {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 20px;
+}
+
+/* ── Capa e foto ─────────────────────────────────────────────────────── */
+.capa {
+  position: relative;
+  /* A foto desce metade da própria altura pra fora da capa; esta margem é o
+     espaço que ela ocupa embaixo, senão o nome subiria por trás dela. */
+  margin-bottom: 58px;
+}
+
+.capa__banner {
+  height: 148px;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--level-0);
+  position: relative;
+}
+
+/* Sem capa escolhida, um degradê da própria paleta em vez de um vazio
+   cinza — a tela continua parecendo acabada. */
+.capa__banner--vazio {
+  background-image:
+    radial-gradient(ellipse 80% 120% at 20% 0%, var(--glass), transparent 70%),
+    linear-gradient(140deg, var(--level-3), var(--level-0));
+}
+
+.capa__acoes {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.capa__btn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--alabaster);
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line-strong);
+  transition: background 0.13s, transform 0.1s;
+}
+
+.capa__btn:hover:not(:disabled) {
+  background: var(--level-3);
+}
+
+.capa__btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.capa__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.capa__foto {
+  position: absolute;
+  bottom: -52px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.capa__btn--foto {
+  position: absolute;
+  right: -2px;
+  bottom: 2px;
+  width: 30px;
+  height: 30px;
+  background: var(--level-2);
+  border-color: var(--line-strong);
+}
+
+.capa__spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
+  animation: capa-gira 0.7s linear infinite;
+}
+
+@keyframes capa-gira {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Avatar reaproveitável ───────────────────────────────────────────── */
+.avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--dusk);
+  display: block;
+  flex-shrink: 0;
+}
+
+.avatar--inicial {
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  color: var(--alabaster);
+  background: linear-gradient(145deg, var(--level-3), var(--dusk));
+  user-select: none;
+}
+
+/* Anel da cor do painel: separa a foto da capa sem desenhar uma borda. */
+.avatar--grande {
+  border: 4px solid var(--level-2);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+}
+
+/* ── Nome e recado ───────────────────────────────────────────────────── */
+.profile__identity {
+  text-align: center;
+  padding: 0 22px;
+}
+
+.profile__name {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* O recado é campo de texto, mas só parece um quando recebe o cursor —
+   antes disso tem que ler como a legenda que fica embaixo do nome. */
+.profile__status {
+  margin-top: 6px;
+  width: 100%;
+  text-align: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font-size: 14px;
+  color: var(--lavender);
+  transition: border-color 0.13s, background 0.13s;
+}
+
+.profile__status:hover {
+  border-color: var(--line);
+}
+
+.profile__status:focus {
+  outline: none;
+  background: var(--level-0);
+  border-color: var(--dusk);
+  color: var(--alabaster);
+}
+
+.profile__status::placeholder {
+  color: var(--lavender);
+  opacity: 0.7;
+}
+
+.profile__recado {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--lavender);
+}
+
+.profile__erro {
+  margin: 0 22px;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  background: var(--level-0);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 12.5px;
+}
+
+/* ── Cartões ─────────────────────────────────────────────────────────── */
+.profile__card {
+  margin: 0 22px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--level-0);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile__card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile__contador {
+  font-size: 11.5px;
+  color: var(--lavender);
+  font-variant-numeric: tabular-nums;
+}
+
+.profile__bio {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  padding: 11px 12px;
+  border-radius: var(--radius);
+  background: var(--level-1);
+  border: 1px solid var(--line);
+  font-size: 14px;
+  line-height: 1.55;
+  transition: border-color 0.13s, box-shadow 0.13s;
+}
+
+.profile__bio:focus {
+  outline: none;
+  border-color: var(--dusk);
+  box-shadow: 0 0 0 4px var(--accent-dim);
+}
+
+.profile__bio::placeholder {
+  color: var(--lavender);
+}
+
+.profile__bio-lida {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--lavender);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+/* ── Seletor de tema ─────────────────────────────────────────────────── */
+.temas {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.tema {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-radius: var(--radius);
+}
+
+/* A bola mostra o tema que VAI entrar, não o que está em vigor: as cores
+   dela são fixas, e por isso o check por cima também precisa ser. Seguir
+   --alabaster deixaria o check branco sobre a bola branca do Ártico. */
+.tema__bola {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  color: #f4f6f8;
+  /* O anel do escolhido cresce pra fora da bola, então precisa de folga que
+     não empurre as outras três — o outline-offset resolve sem ocupar caixa. */
+  outline: 2px solid transparent;
+  outline-offset: 4px;
+  transition: outline-color 0.15s, transform 0.1s, box-shadow 0.15s;
+}
+
+.tema:hover .tema__bola {
+  outline-color: var(--line-strong);
+}
+
+.tema:active .tema__bola {
+  transform: scale(0.9);
+}
+
+.tema--ativo .tema__bola {
+  outline-color: var(--accent);
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
+.tema__bola svg {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+}
+
+/* O Ártico é a primeira bola e a única clara — nela o check inverte. */
+.tema:first-child .tema__bola {
+  color: #16212e;
+}
+
+.tema:first-child .tema__bola svg {
+  filter: none;
+}
+
+.tema__nome {
+  font-size: 11.5px;
+  color: var(--lavender);
+  white-space: nowrap;
+}
+
+.tema--ativo .tema__nome {
+  color: var(--alabaster);
+  font-weight: 600;
+}
+
+/* ── Alvos de clique que abrem perfil ────────────────────────────────── */
+/* O layout continua vindo das classes originais (.userbar__id, .member,
+   .msg__avatar). Aqui só entra o que muda por virar área clicável. */
+
+/* O padding é o que dá corpo ao realce; a margem negativa devolve o
+   espaço, pra barra não crescer só por ter ganhado um hover. */
+.userbar__id--botao {
+  width: 100%;
+  text-align: left;
+  padding: 5px 6px;
+  margin: -5px -6px;
+  border-radius: var(--radius);
+  transition: background 0.12s;
+}
+
+.userbar__id--botao:hover {
+  background: var(--hover);
+}
+
+.member[role="button"] {
+  cursor: pointer;
+}
+
+.member[role="button"]:hover {
+  background: var(--hover);
+}
+
+.msg__avatar-btn {
+  padding: 0;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: flex-start;
+  transition: opacity 0.12s;
+}
+
+.msg__avatar-btn:hover {
+  opacity: 0.8;
+}
+
+/* O <button> traz padding de fabrica; sem zerar, o nome sai do alinhamento
+   com o horario que fica ao lado dele. */
+.msg__author--botao {
+  padding: 0;
+  border-radius: var(--radius-sm);
+  transition: color 0.12s;
+}
+
+.msg__author--botao:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}

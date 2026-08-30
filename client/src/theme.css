@@ -18,6 +18,12 @@
   --danger: #e5484d;
   --live: #e8a33d;
 
+  /* Amarelo da marca. Fica FORA da paleta de interface de propósito: só a
+     logo usa. O resto do app continua no azul-petróleo do DESIGN.md — se
+     este amarelo virasse cor de botão, o sistema inteiro perderia o pé. */
+  --brand: #f5c518;
+  --brand-glow: rgba(245, 197, 24, 0.32);
+
   /* Camadas: elevação é tom, não sombra */
   --level-0: #0a1521; /* o fundo de tudo, um passo abaixo do ink */
   --level-1: var(--ink); /* canvas do chat, palco */
@@ -145,12 +151,12 @@ textarea {
   gap: 10px;
 }
 
-.sidebar__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-dim), 0 0 10px var(--accent-glow);
+.sidebar__logo {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 8px var(--brand-glow));
 }
 
 .sidebar__scroll {
@@ -242,6 +248,17 @@ textarea {
 
 .member:hover {
   background: var(--hover);
+}
+
+/* Quem está em OUTRO canal. Um pouco apagado, porque é informação de
+   segundo plano — e porque esses dados chegam de poucos em poucos
+   segundos, não ao vivo como os do canal em que você está. */
+.member--away {
+  opacity: 0.62;
+}
+
+.member--away:hover {
+  opacity: 1;
 }
 
 .member__avatar {
@@ -460,6 +477,64 @@ textarea {
   gap: 6px;
 }
 
+/* ── Volume do som da tela ───────────────────────────────────────────────
+   Fica sobre a própria tela, no canto oposto ao nome: é o som DAQUELA
+   transmissão, e ancorar o controle no vídeo deixa isso óbvio quando duas
+   pessoas compartilham ao mesmo tempo. */
+.tile__vol {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 6px;
+  border-radius: var(--radius);
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
+  /* Discreto até a pessoa ir mexer: em cima de um jogo, um controle sempre
+     em destaque vira poluição. */
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+
+.tile:hover .tile__vol,
+.tile__vol:focus-within,
+.tile__vol--mudo {
+  opacity: 1;
+}
+
+.tile__vol-btn {
+  display: grid;
+  place-items: center;
+  color: var(--lavender);
+  transition: color 0.12s;
+}
+
+.tile__vol-btn:hover {
+  color: var(--alabaster);
+}
+
+.tile__vol--mudo .tile__vol-btn {
+  color: var(--danger);
+}
+
+.tile__vol-slider {
+  width: 96px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.tile__vol-value {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--lavender);
+  min-width: 34px;
+  text-align: right;
+}
+
 /* ── Chat ────────────────────────────────────────────────────────────── */
 .chat {
   flex: 1;
@@ -608,8 +683,11 @@ textarea {
   flex-shrink: 0;
 }
 
-/* ── Login ───────────────────────────────────────────────────────────── */
-.login {
+/* ── Login e atualização ─────────────────────────────────────────────── */
+/* Compartilham o fundo e o cartão: são as duas telas de entrada do app, e
+   ver a mesma moldura nas duas deixa claro que ainda é o mesmo programa. */
+.login,
+.updater {
   height: 100%;
   display: grid;
   place-items: center;
@@ -619,7 +697,8 @@ textarea {
     var(--level-0);
 }
 
-.login__card {
+.login__card,
+.updater__card {
   width: 380px;
   background: linear-gradient(180deg, var(--prussian), var(--ink));
   border: 1px solid var(--line);
@@ -628,18 +707,118 @@ textarea {
   text-align: center;
 }
 
-.login__mark {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto 20px;
-  border-radius: var(--radius-lg);
-  display: grid;
-  place-items: center;
-  background: linear-gradient(150deg, var(--accent), var(--dusk));
-  color: var(--ink);
-  font-size: 26px;
-  font-weight: 800;
-  box-shadow: 0 0 28px var(--accent-dim);
+/* A marca é um emblema com fundo transparente, então o brilho tem que
+   seguir o RECORTE dela — drop-shadow faz isso, box-shadow desenharia um
+   halo quadrado em volta da caixa. É a "elevação por brilho" do DESIGN.md
+   aplicada à forma real. */
+.login__mark,
+.updater__mark {
+  display: block;
+  width: 88px;
+  height: 88px;
+  margin: 0 auto 18px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 24px var(--brand-glow));
+}
+
+/* O selo respira enquanto baixa: sinal de que algo está acontecendo mesmo
+   quando a barra ainda não tem porcentagem pra mostrar. */
+.updater__mark {
+  animation: updater-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes updater-breathe {
+  0%, 100% { box-shadow: 0 0 28px var(--accent-dim); }
+  50%      { box-shadow: 0 0 40px var(--accent-glow); }
+}
+
+.updater__title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.updater__versions {
+  margin: 0 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--lavender);
+}
+
+.updater__arrow {
+  color: var(--dusk);
+}
+
+.updater__versions-new {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Barra de progresso ──────────────────────────────────────────────── */
+.updater__bar {
+  height: 6px;
+  background: var(--level-0);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.updater__fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--dusk), var(--accent));
+  box-shadow: 0 0 12px var(--accent-glow);
+  transition: width 0.25s ease-out;
+}
+
+/* Antes do primeiro byte não há porcentagem pra mostrar, então uma faixa
+   atravessa a barra em vez de fingir um progresso que não existe. */
+.updater__bar--waiting .updater__fill {
+  width: 35%;
+  animation: updater-sweep 1.5s ease-in-out infinite;
+}
+
+@keyframes updater-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(285%); }
+}
+
+.updater__percent {
+  margin: 14px 0 0;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.updater__detail {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--lavender);
+  line-height: 1.55;
+}
+
+.updater__detail--error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.updater__escape {
+  margin-top: 22px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .updater__mark,
+  .updater__bar--waiting .updater__fill {
+    animation: none;
+  }
 }
 
 .login__title {

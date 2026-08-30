@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Deep Sea - Edit Profile</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts: Inter & JetBrains Mono -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "outline-variant": "#44474c",
+                        "surface-dim": "#111412",
+                        "tertiary-fixed-dim": "#afc9ea",
+                        "on-primary-container": "#768497",
+                        "primary": "#bac8dc",
+                        "surface-container-low": "#1a1c1a",
+                        "secondary": "#bbc6e2",
+                        "on-tertiary-fixed-variant": "#2f4865",
+                        "surface-bright": "#373a37",
+                        "on-secondary": "#263046",
+                        "on-primary": "#243141",
+                        "primary-fixed": "#d6e4f9",
+                        "primary-container": "#0d1b2a",
+                        "tertiary": "#afc9ea",
+                        "surface-container": "#1e201e",
+                        "on-primary-fixed-variant": "#3a4859",
+                        "on-error": "#690005",
+                        "background": "#111412",
+                        "secondary-fixed-dim": "#bbc6e2",
+                        "on-surface-variant": "#c4c6cc",
+                        "secondary-fixed": "#d7e2ff",
+                        "error-container": "#93000a",
+                        "surface-container-high": "#282b28",
+                        "on-background": "#e2e3df",
+                        "on-surface": "#e2e3df",
+                        "inverse-surface": "#e2e3df",
+                        "on-error-container": "#ffdad6",
+                        "tertiary-fixed": "#d1e4ff",
+                        "on-secondary-fixed-variant": "#3c475d",
+                        "surface-tint": "#bac8dc",
+                        "tertiary-container": "#001b33",
+                        "outline": "#8e9196",
+                        "on-secondary-fixed": "#101b30",
+                        "surface-container-highest": "#333533",
+                        "on-tertiary-fixed": "#001d36",
+                        "error": "#ffb4ab",
+                        "inverse-primary": "#525f71",
+                        "primary-fixed-dim": "#bac8dc",
+                        "inverse-on-surface": "#2f312e",
+                        "surface-variant": "#333533",
+                        "on-primary-fixed": "#0f1c2c",
+                        "on-secondary-container": "#adb8d3",
+                        "surface": "#111412",
+                        "surface-container-lowest": "#0c0f0d",
+                        "on-tertiary-container": "#6b85a4",
+                        "secondary-container": "#3e4960",
+                        "on-tertiary": "#17324d"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "container-padding": "24px",
+                        "server-rail-width": "72px",
+                        "sidebar-width": "240px",
+                        "stack-gap-md": "12px",
+                        "stack-gap-sm": "4px",
+                        "gutter": "16px",
+                        "safe": "env(safe-area-inset-bottom, 20px)"
+                    },
+                    fontFamily: {
+                        "chat-code": ["JetBrains Mono"],
+                        "label-caps": ["Inter"],
+                        "chat-body": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "headline-sm": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "headline-md": ["Inter"]
+                    },
+                    fontSize: {
+                        "chat-code": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700" }],
+                        "chat-body": ["15px", { "lineHeight": "22px", "fontWeight": "400" }],
+                        "label-sm": ["12px", { "lineHeight": "16px", "fontWeight": "500" }],
+                        "headline-sm": ["18px", { "lineHeight": "24px", "fontWeight": "600" }],
+                        "display-lg": ["40px", { "lineHeight": "48px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        /* Custom scrollbar for webkit */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #333533; 
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #44474c; 
+        }
+    </style>
+</head>
+<body class="bg-surface-container-lowest text-on-surface antialiased min-h-screen flex flex-col font-chat-body">
+<!-- Top App Bar (Task-Focused: Modal Edit State) -->
+<header class="sticky top-0 z-50 flex items-center justify-between px-gutter h-16 w-full bg-surface-container-lowest/80 backdrop-blur-md border-b border-outline-variant/30 transition-colors duration-200">
+<button class="font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface transition-colors p-2 -ml-2 rounded-lg hover:bg-surface-variant/20">
+            Cancel
+        </button>
+<h1 class="font-headline-sm text-headline-sm text-on-surface font-semibold tracking-tight">Edit Profile</h1>
+<button class="font-label-sm text-label-sm bg-secondary-container text-on-secondary-container px-4 py-2 rounded-full font-medium hover:bg-secondary-container/80 transition-all active:scale-95 shadow-sm">
+            Save
+        </button>
+</header>
+<!-- Main Scrollable Canvas -->
+<main class="flex-1 overflow-y-auto pb-safe flex flex-col items-center">
+<div class="w-full max-w-[600px] flex flex-col">
+<!-- Visual Identity: Banner & Avatar -->
+<div class="relative w-full">
+<!-- Banner Image -->
+<div class="h-40 md:h-48 w-full relative bg-cover bg-center rounded-b-xl border-b border-outline-variant/20" data-alt="An expansive, dark abyssal oceanic trench, illuminated faintly by bioluminescent flora in cool cyan and deep prussian blue tones. High-end digital art style, serene and mysterious, acting as a profile banner background." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuBxW_yBKHSyjRe_oihus06dSfbWYuBMLXNye4cxpImvNyvuBqiLbxViLlzT_i_k5pQ1eYrVcK30AjyludLT5J6DPS4684c_cdvtIFnzFc67l8Rqpb7C8KnxsA_ZJ6YAwnk7tNuOxNxsYZCQwdSfpvxndzN7-LLr35rpuMGjjFu0SHIZSOIVbm5k6k3eWScNjlJOYG28dewNMmNXoEq9oB6y222yoU51k8MDiqyalw70BeRCERyTXAG0Jw')">
+<button class="absolute bottom-3 right-3 bg-surface-container-lowest/60 backdrop-blur-md p-2 rounded-full text-on-surface border border-outline-variant/40 active:scale-95 transition-transform shadow-lg hover:bg-surface-container-lowest/80">
+<span class="material-symbols-outlined text-[18px]">edit</span>
+</button>
+</div>
+<!-- Circular Avatar Overlap -->
+<div class="absolute -bottom-14 left-0 w-full flex justify-center pointer-events-none">
+<div class="relative inline-block pointer-events-auto">
+<img class="w-28 h-28 rounded-full border-4 border-surface-container-lowest object-cover bg-surface-container-high shadow-xl" data-alt="A stylized, high-tech diving helmet avatar, glowing softly with cyan light against an ink-black background. Modern glassmorphism style, highly detailed and professional, centered perfectly." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCIc3rH1EfgD8_YvDpi23au6fML3VbtshNJZf36mY3gV3uSxmG15Tx6gp-zO7leQXdP_zi4ls6b8DCcwOe7bAdL7VWyma667ZT7scn_7KCFcz79fBKV3p3FlH2Sz6Nz8_INP7vdjQVgZ8joscxIHM1lcvfS-obwxfP_Pu5pSWQ_oVvP2ZLMVmIyhJ68Cl84RicyXbW0tkFaarFHfMNyv2RIen9YhYbXrzvpz3j7Iynrfi7j3GGjizvkgw"/>
+<button class="absolute bottom-0 right-0 bg-primary-container text-primary p-2 rounded-full border-2 border-surface-container-lowest active:scale-95 shadow-lg transition-transform hover:bg-primary-container/80">
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">edit</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Profile Info (Static/Display) -->
+<div class="text-center px-gutter pt-16 pb-6">
+<h2 class="font-headline-md text-headline-md text-on-surface font-bold tracking-tight">DeepDiver_01</h2>
+<div class="flex items-center justify-center gap-2 mt-1 text-primary">
+<span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_rgba(186,200,220,0.6)]"></span>
+<p class="font-chat-body text-chat-body">Exploring the depths</p>
+</div>
+</div>
+<!-- About Me Editor Card -->
+<section class="px-gutter mb-6 w-full">
+<div class="bg-surface rounded-xl border border-outline-variant/30 p-4 flex flex-col gap-3 shadow-[inset_0_1px_0_rgba(65,90,119,0.3)]">
+<div class="flex items-center justify-between">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">About Me</label>
+<span class="material-symbols-outlined text-on-surface-variant text-[16px]">draw</span>
+</div>
+<div class="relative group">
+<textarea class="w-full bg-primary-container/30 text-on-surface font-chat-body text-chat-body rounded-lg p-3 border border-outline-variant/30 focus:border-primary focus:ring-1 focus:ring-primary/50 outline-none resize-none h-28 transition-all placeholder-on-surface-variant/50" placeholder="Write a short bio...">Fascinated by the abyssal plains and deep-sea communication protocols. Always seeking the next digital trench to explore. Serene power is the way.</textarea>
+</div>
+</div>
+</section>
+<!-- Theme Customization Section -->
+<section class="px-gutter mb-8 w-full">
+<div class="bg-surface rounded-xl border border-outline-variant/30 p-5 flex flex-col gap-4 shadow-[inset_0_1px_0_rgba(65,90,119,0.3)]">
+<div class="flex items-center justify-between">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">App Theme</h3>
+<span class="font-label-sm text-label-sm text-primary bg-primary-container px-2 py-1 rounded border border-primary/20">Pro Feature</span>
+</div>
+<div class="flex justify-between items-center w-full gap-2 mt-2">
+<!-- Arctic White -->
+<button aria-label="Select Arctic White theme" class="flex flex-col items-center gap-2 group outline-none">
+<div class="w-14 h-14 rounded-full bg-on-surface border border-outline-variant flex items-center justify-center transition-transform active:scale-90 group-hover:shadow-[0_0_15px_rgba(226,227,223,0.2)]"></div>
+</button>
+<!-- Dusk Blue (Active) -->
+<button aria-label="Select Dusk Blue theme" class="flex flex-col items-center gap-2 group outline-none">
+<div class="w-14 h-14 rounded-full bg-secondary-container border border-outline flex items-center justify-center transition-transform active:scale-90 ring-2 ring-primary ring-offset-4 ring-offset-surface-container-lowest shadow-[0_0_20px_rgba(62,73,96,0.5)]">
+<span class="material-symbols-outlined text-on-secondary-container" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+</button>
+<!-- Prussian Blue -->
+<button aria-label="Select Prussian Blue theme" class="flex flex-col items-center gap-2 group outline-none">
+<div class="w-14 h-14 rounded-full bg-tertiary-container border border-outline-variant flex items-center justify-center transition-transform active:scale-90 group-hover:shadow-[0_0_15px_rgba(0,27,51,0.5)]"></div>
+</button>
+<!-- Ink Black -->
+<button aria-label="Select Ink Black theme" class="flex flex-col items-center gap-2 group outline-none">
+<div class="w-14 h-14 rounded-full bg-primary-container border border-outline-variant flex items-center justify-center transition-transform active:scale-90 group-hover:shadow-[0_0_15px_rgba(13,27,42,0.5)]"></div>
+</button>
+</div>
+</div>
+</section>
+</div>
+</main>
+</body></html>

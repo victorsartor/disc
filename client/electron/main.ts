@@ -1,12 +1,12 @@
 import {
   app, BrowserWindow, ipcMain, shell, safeStorage,
-  desktopCapturer, globalShortcut, clipboard,
+  desktopCapturer, globalShortcut, clipboard, Menu,
 } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import {
-  getSettings, patchSettings, setVolume, sanitizePatch,
+  getSettings, patchSettings, setVolume, setScreenVolume, sanitizePatch,
 } from './settings.js';
 import {
   init as initPtt, syncWithSettings as syncPtt, shutdown as shutdownPtt,
@@ -16,6 +16,9 @@ import {
   showOverlay, hideOverlay, destroyOverlay, toggleOverlay,
   pushState, setInteractive,
 } from './overlay.js';
+import {
+  init as initUpdater, currentState as updateState, skip as skipUpdate,
+} from './updater.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -100,6 +103,15 @@ function handleDeepLink(url: string | undefined): void {
   }
 }
 
+// Mata o menu padrao (File/Edit/View/Window/Help) em vez de so escondê-lo.
+// O autoHideMenuBar apenas oculta: qualquer Alt traz ele de volta - e Alt e
+// justamente uma das teclas mais escolhidas pra apertar-para-falar, entao
+// falar no jogo abria um menu por cima da tela.
+//
+// Copiar e colar continuam funcionando: quem trata Ctrl+C/V dentro de campo
+// de texto e o proprio Chromium, nao os itens deste menu.
+if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1200,
@@ -158,6 +170,10 @@ if (!app.requestSingleInstanceLock()) {
     loadSession();
     createWindow();
 
+    // Comeca a checar antes do renderer montar. O estado fica guardado no
+    // modulo, entao a tela pega o que ja aconteceu quando perguntar.
+    initUpdater(() => win);
+
     // Hold-to-talk real: hook de teclado no nivel do SO, com keydown E keyup.
     // So sobe se o modo escolhido for PTT. Ver a nota de seguranca em ptt.ts.
     initPtt((down) => win?.webContents.send('ptt:state', down));
@@ -190,9 +206,15 @@ ipcMain.handle('auth:logout', () => {
   win?.webContents.send('auth:changed', false);
 });
 
+// --- IPC: atualizacao ----------------------------------------------------
+ipcMain.handle('update:state', () => updateState());
+ipcMain.handle('update:skip', () => skipUpdate());
+ipcMain.handle('app:version', () => app.getVersion());
+
 // --- IPC: API ------------------------------------------------------------
 ipcMain.handle('api:me', () => apiFetch('/api/me'));
 ipcMain.handle('api:messages', () => apiFetch('/api/messages'));
+ipcMain.handle('api:presence', () => apiFetch('/api/presence'));
 ipcMain.handle('api:send-message', (_e, body: string) =>
   apiFetch('/api/messages', { method: 'POST', body: JSON.stringify({ body }) }));
 ipcMain.handle('api:room-token', (_e, channelId: string) =>
@@ -201,17 +223,56 @@ ipcMain.handle('api:whip-config', (_e, channelId: string) =>
   apiFetch(`/api/rooms/${encodeURIComponent(channelId)}/whip`, { method: 'POST' }));
 
 // --- IPC: captura de tela ------------------------------------------------
+
+/**
+ * Janelas que nao sao conteudo compartilhavel.
+ *
+ * Sao camadas do proprio sistema e overlays de outros programas: existem
+ * como janela pro Windows, mas compartilhar qualquer uma delas so rende
+ * retangulo preto. Ficavam no meio da lista atrapalhando a escolha.
+ */
+const JANELAS_IGNORADAS = [
+  /^NVIDIA GeForce Overlay/i,
+  /^Program Manager$/i,
+  /^PopupHost$/i,
+
+  // Em ingles e em portugues: o Windows nomeia as proprias janelas no idioma
+  // do sistema, e conferi numa maquina pt-BR que "Experiencia de Entrada do
+  // Windows" aparece exatamente assim. Cobrir so o ingles deixaria passar.
+  /^Windows (Input Experience|Shell Experience Host)$/i,
+  /^Experiência de Entrada do Windows$/i,
+  /^Host de Experiência do Shell do Windows$/i,
+  /^Microsoft Text Input Application$/i,
+  /^Aplicativo de Entrada de Texto da Microsoft$/i,
+];
+
 ipcMain.handle('screen:sources', async () => {
   const sources = await desktopCapturer.getSources({
     types: ['screen', 'window'],
     thumbnailSize: { width: 320, height: 180 },
   });
-  return sources.map((s) => ({
-    id: s.id,
-    name: s.name,
-    thumbnail: s.thumbnail.toDataURL(),
-    isScreen: s.id.startsWith('screen:'),
-  }));
+
+  // As janelas do proprio app saem pelo titulo real, perguntado ao Electron -
+  // assim renomear o app nao deixa uma string velha pra tras aqui.
+  const minhas = new Set(
+    BrowserWindow.getAllWindows()
+      .map((w) => w.getTitle())
+      .filter(Boolean),
+  );
+
+  return sources
+    .filter((s) => {
+      if (s.id.startsWith('screen:')) return true; // telas passam sempre
+      if (!s.name.trim()) return false;
+      if (minhas.has(s.name)) return false;
+      return !JANELAS_IGNORADAS.some((re) => re.test(s.name));
+    })
+    .map((s) => ({
+      id: s.id,
+      name: s.name,
+      thumbnail: s.thumbnail.toDataURL(),
+      isScreen: s.id.startsWith('screen:'),
+    }));
 });
 
 // --- IPC: configuracoes --------------------------------------------------
@@ -242,6 +303,10 @@ ipcMain.handle('settings:set-volume', (_e, identity: string, volume: number) => 
   setVolume(identity, volume);
 });
 
+ipcMain.handle('settings:set-screen-volume', (_e, identity: string, volume: number) => {
+  setScreenVolume(identity, volume);
+});
+
 // --- IPC: overlay --------------------------------------------------------
 ipcMain.handle('overlay:toggle', () => {
   const enabled = toggleOverlay();
@@ -269,4 +334,23 @@ ipcMain.handle('clipboard:write', (_e, text: string) => {
 
 ipcMain.handle('settings:cancel-capture', () => {
   cancelCapture();
+});
+
+// --- IPC: perfil ---------------------------------------------------------
+// A imagem chega do renderer ja redimensionada, como data URL (ver
+// lib/image.ts). Quem fala com o servidor continua sendo so este processo:
+// o token de sessao nunca sai daqui.
+ipcMain.handle('api:user', (_e, identity: string) =>
+  apiFetch(`/api/users/${encodeURIComponent(identity)}`));
+
+ipcMain.handle('api:profile-patch', (_e, patch: unknown) =>
+  apiFetch('/api/me/profile', { method: 'PATCH', body: JSON.stringify(patch) }));
+
+ipcMain.handle('api:profile-image', (_e, kind: unknown, dataUrl: unknown) => {
+  const rota = kind === 'banner' ? 'banner' : 'avatar';
+  const corpo = typeof dataUrl === 'string' ? dataUrl : null;
+  return apiFetch(`/api/me/${rota}`, {
+    method: 'POST',
+    body: JSON.stringify({ dataUrl: corpo }),
+  });
 });

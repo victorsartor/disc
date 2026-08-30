@@ -8,10 +8,14 @@
 
 # Notas locais — não fazem parte do que roda.
 # Para versionar alguma delas depois, é só apagar a linha aqui.
-README.md
-DESIGN.md
-cores.md
-Gemini_Generated_Image_*.jpg
+#
+# A barra inicial ancora na RAIZ. Sem ela, "DESIGN.md" casaria em qualquer
+# profundidade e levaria junto design/DESIGN.md — que é documentação do
+# projeto, não rascunho local.
+/README.md
+/DESIGN.md
+/cores.md
+/Gemini_Generated_Image_*.jpg
 
 # Dados
 data/
@@ -33,3 +37,8 @@ Thumbs.db
 
 # Certificados gerados pelo Tailscale — contêm chave privada
 certs/
+
+# Instaladores publicados pro auto-update. São artefatos de build (75 MB
+# cada), não fonte — a pasta em si fica, o conteúdo não.
+atualizacoes/*
+!atualizacoes/.gitkeep

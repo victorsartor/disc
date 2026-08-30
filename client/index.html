@@ -3,12 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <!-- CSP estrito: sem eval, sem script externo. Mata a maior parte dos vetores de XSS. -->
+    <!-- CSP estrito: sem eval, sem script externo. Mata a maior parte dos vetores de XSS.
+         font-src precisa de data: porque o Vite embute as fontes menores como
+         data URI no CSS. Sem isso o Inter e o JetBrains Mono sao recusados no
+         app empacotado, em silencio, e a tipografia inteira cai pro Segoe UI.
+
+         img-src aceita http://localhost:3000 so por causa do dev: as fotos
+         de perfil sao servidas pelo backend, e em desenvolvimento ele e
+         http. Em producao a URL e https e ja estaria coberta. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' blob:; connect-src 'self' https: wss:;"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https: http://localhost:3000; media-src 'self' blob:; connect-src 'self' https: wss:;"
     />
-    <title>Concord</title>
+    <title>Disneia</title>
   </head>
   <body>
     <div id="root"></div>

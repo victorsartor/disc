@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Message } from '../types';
+import { Avatar } from './Profile';
 
 const timeFmt = new Intl.DateTimeFormat('pt-BR', {
   hour: '2-digit',
@@ -9,9 +10,11 @@ const timeFmt = new Intl.DateTimeFormat('pt-BR', {
 interface Props {
   messages: Message[];
   onSend: (body: string) => Promise<void>;
+  /** Clicar na foto ou no nome de quem escreveu abre o perfil da pessoa. */
+  onOpenUser: (identity: string) => void;
 }
 
-export function Chat({ messages, onSend }: Props) {
+export function Chat({ messages, onSend, onOpenUser }: Props) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
@@ -54,15 +57,26 @@ export function Chat({ messages, onSend }: Props) {
         ) : (
           messages.map((m) => (
             <div className="msg" key={m.id}>
-              <img
-                className="msg__avatar"
-                src={m.author_avatar ?? undefined}
-                alt=""
-                referrerPolicy="no-referrer"
-              />
+              <button
+                className="msg__avatar-btn"
+                onClick={() => onOpenUser(m.user_id)}
+                title={`Ver o perfil de ${m.author_name}`}
+              >
+                <Avatar
+                  url={m.author_avatar}
+                  name={m.author_name}
+                  size={36}
+                  className="msg__avatar"
+                />
+              </button>
               <div className="msg__body">
                 <div className="msg__head">
-                  <span className="msg__author">{m.author_name}</span>
+                  <button
+                    className="msg__author msg__author--botao"
+                    onClick={() => onOpenUser(m.user_id)}
+                  >
+                    {m.author_name}
+                  </button>
                   <span className="msg__time">{timeFmt.format(m.created_at)}</span>
                 </div>
                 {/* Texto puro via children do React — escapado automaticamente.
