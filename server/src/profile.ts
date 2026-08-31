@@ -16,14 +16,40 @@ export const MAX_NAME_LENGTH = 32;
  *  isto é a rede de segurança contra quem falar com a API na mão. */
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 
+/**
+ * Teto de imagem animada — maior, porque é a única que ninguém reduziu.
+ *
+ * As outras chegam aqui já passadas pelo canvas do cliente, num tamanho que
+ * a tela vai realmente usar. Um GIF não pode: canvas desenha um quadro só, e
+ * reduzir mataria a animação junto. Então ele sobe do jeito que saiu do
+ * disco, e o teto sobe com ele. Bate com o MAX_ANIMADA_BYTES do
+ * client/src/lib/image.ts — os dois números têm que andar juntos.
+ *
+ * Estes bytes viram BLOB no SQLite (ver o comentário da tabela images), e o
+ * better-sqlite3 é síncrono: 8 MB ainda é rápido o bastante pra não travar
+ * o event loop de forma perceptível. Um teto muito acima disso seria o
+ * sinal de que as imagens deveriam ir pro filesDir, como os anexos foram.
+ */
+const MAX_ANIMATED_BYTES = 8 * 1024 * 1024;
+
 // Só formatos que todo navegador desenha. Nada de SVG: SVG é documento, e
 // documento com <script> dentro servido do nosso domínio é XSS de graça.
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
+/**
+ * Os que podem chegar animados, e por isso ganham o teto maior.
+ *
+ * Não checamos se o arquivo REALMENTE está animado — um PNG disfarçado de
+ * GIF só compraria 5 MB a mais de espaço, e o custo de decodificar todo
+ * upload pra confirmar não paga isso.
+ */
+const ANIMATED_MIME = new Set(['image/gif', 'image/webp']);
+
 const DATA_URL = /^data:([a-z]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/;
 
-/** Base64 gordo o bastante pra virar 3 MB depois de decodificado. */
-const MAX_BODY_BYTES = 8 * 1024 * 1024;
+/** Base64 gordo o bastante pra virar os 8 MB de um animado depois de
+ *  decodificado — o base64 infla um terço, e ainda sobra pro JSON em volta. */
+const MAX_BODY_BYTES = 12 * 1024 * 1024;
 
 /**
  * A identidade do LiveKit é o id do usuário — exceto a do ingress do OBS,
@@ -61,7 +87,9 @@ function decodeDataUrl(raw: unknown): { mime: string; bytes: Buffer } {
 
   const bytes = Buffer.from(m[2], 'base64');
   if (bytes.length === 0) throw new Error('imagem vazia');
-  if (bytes.length > MAX_IMAGE_BYTES) throw new Error('imagem muito grande');
+
+  const teto = ANIMATED_MIME.has(mime) ? MAX_ANIMATED_BYTES : MAX_IMAGE_BYTES;
+  if (bytes.length > teto) throw new Error('imagem muito grande');
 
   return { mime, bytes };
 }

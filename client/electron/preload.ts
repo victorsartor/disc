@@ -60,9 +60,15 @@ const api = {
       ipcRenderer.invoke('api:profile-image', kind, dataUrl),
   },
 
-  /** Cores dos botoes de janela: a barra e do SO e nao le o CSS do tema. */
-  titlebar: (color: string, symbolColor: string): Promise<void> =>
-    ipcRenderer.invoke('window:titlebar', color, symbolColor),
+  /**
+   * Cores dos botoes de janela: a barra e do SO e nao le o CSS do tema.
+   *
+   * `bg` e o fundo da janela (--level-1). Nao muda nada agora - a janela ja
+   * esta aberta e o CSS ja pintou por cima - mas fica guardado pra proxima
+   * abertura, que e quando a cor errada apareceria como flash.
+   */
+  titlebar: (color: string, symbolColor: string, bg?: string): Promise<void> =>
+    ipcRenderer.invoke('window:titlebar', color, symbolColor, bg),
 
   screenSources: () => ipcRenderer.invoke('screen:sources'),
 

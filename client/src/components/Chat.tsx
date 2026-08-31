@@ -3,7 +3,7 @@ import type { Attachment, Message } from '../types';
 import { Avatar } from './Profile';
 import { Anexo, Lightbox, tamanhoLegivel } from './Anexo';
 import { IconClipe, IconClose } from './Icons';
-import { prepareChatImage } from '../lib/image';
+import { ehImagemAnimada, prepareChatImage } from '../lib/image';
 
 const timeFmt = new Intl.DateTimeFormat('pt-BR', {
   hour: '2-digit',
@@ -71,7 +71,18 @@ export function Chat({ messages, onSend, onOpenUser, chatVolume }: Props) {
     setSubindo(true);
     try {
       let r: { attachment: Attachment };
-      if (file.type.startsWith('image/')) {
+
+      // A divisão é entre imagem que a gente REPROCESSA e imagem que vai
+      // crua. GIF (e WebP animado) não pode passar pelo canvas — sairia com
+      // um quadro só — então não há nada pra reduzir, e mandar os bytes pelo
+      // IPC seria copiar um arquivo inteiro na memória dos dois lados sem
+      // ganho nenhum. Ela desce pelo caminho do arquivo, como todo mundo que
+      // sobe cru; o servidor continua classificando image/gif como 'image',
+      // então na conversa ela aparece igual.
+      const reprocessavel =
+        file.type.startsWith('image/') && !(await ehImagemAnimada(file));
+
+      if (reprocessavel) {
         // Imagem passa pelo canvas primeiro: reduz e vai como bytes.
         const img = await prepareChatImage(file);
         r = await window.disc.arquivos.enviarImagem(img.bytes, img.nome, img.mime);

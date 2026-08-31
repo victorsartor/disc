@@ -1,4 +1,4 @@
-/* ── Os oito temas ────────────────────────────────────────────────────────
+/* ── Os dez temas ─────────────────────────────────────────────────────────
    O theme.css inteiro pinta por variável, então trocar de tema é trocar
    estas declarações — não há regra de componente aqui embaixo.
 
@@ -244,6 +244,101 @@
   --line: rgba(123, 44, 191, 0.4);
   --line-strong: rgba(123, 44, 191, 0.68);
   --hover: rgba(199, 125, 255, 0.08);
+
+  color-scheme: dark;
+}
+
+/* ── Rosé — pastel sobre fundo escuro ─────────────────────────────────────
+   As cinco cores da paleta entram SEM alteração nenhuma. Elas são todas de
+   luminosidade alta, e é por isso que só funcionam por cima de um fundo
+   escuro: num tema claro, cada uma teria que ser escurecida pra ter
+   contraste — e aí não seria mais esta paleta.
+
+     baby pink   #ffafcc → --accent      (a estrela)
+     thistle     #cdb4db → --lavender    (texto secundário, 41 usos)
+     pastel petal#ffc8dd → --alabaster   (texto principal)
+     sky blue    #a2d2ff → --live
+     icy blue    #bde0fe → --glass
+
+   O sky blue no --live é escolha, não sobra: esse é o fundo da etiqueta
+   "ao vivo" na sidebar, e uma pílula fria contra uma tela inteira de rosa é
+   justamente o contraste que a paleta pede. O custo é o
+   .settings__hint--warn, que usa a mesma variável e fica azul num lugar
+   onde azul lê como "informação" e não como "atenção" — vale, porque a
+   etiqueta aparece o tempo todo e o aviso quase nunca.
+
+   O --danger é o único que vem de FORA da paleta, e tem que vir: ela não
+   tem nenhum vermelho, e num tema todo rosa o "perigo" precisa se separar
+   do acento — senão microfone mudo e botão de ação viram a mesma cor. Rosa
+   e vermelho são vizinhos, então a separação foi medida em vez de chutada:
+   #ff4438 fica 25° de matiz e 23 pontos de luminosidade longe do #ffafcc,
+   que é o dobro do que um vermelho-rosado (#ff5f6d) dava. Escarlate lê como
+   alarme; qualquer coisa mais perto do rosa lê como decoração.
+
+   Os fundos carregam o roxo do thistle em vez de serem cinza neutro — é o
+   que faz o pastel assentar por cima em vez de flutuar.
+   ──────────────────────────────────────────────────────────────────────── */
+:root[data-theme="rose"] {
+  --ink: #150f16;
+  --prussian: #241b26;
+  --dusk: #6b5570;
+  --lavender: #cdb4db;
+  --alabaster: #ffc8dd;
+
+  --accent: #ffafcc;
+  --accent-dim: rgba(255, 175, 204, 0.14);
+  --accent-glow: rgba(255, 175, 204, 0.32);
+  --danger: #ff4438;
+  --live: #a2d2ff;
+
+  --level-0: #120c13;
+  --level-1: #150f16;
+  --level-2: #211925;
+  --level-3: #2e2333;
+  --glass: rgba(189, 224, 254, 0.08);
+
+  --line: rgba(205, 180, 219, 0.22);
+  --line-strong: rgba(205, 180, 219, 0.42);
+  --hover: rgba(255, 175, 204, 0.08);
+
+  color-scheme: dark;
+}
+
+/* ── Total Black — Amoled ─────────────────────────────────────────────────
+   Preto de verdade, não "quase preto": o --level-0 (o fundo que ocupa mais
+   pixel do app — shell, log do chat, campos) é #000000, e num painel OLED
+   pixel preto é pixel desligado.
+
+   As linhas aqui são BRANCO com alfa, não o azul dos outros temas. Herdar
+   o azul do Abissal é exatamente o que faz um preto parecer sujo: sobre
+   #000 qualquer matiz na borda aparece, e a tela deixa de ler como preta.
+
+   Os níveis 2 e 3 sobem pouco (#0d e #17) porque é só deles que vem a
+   separação entre painel e fundo — sem o degradê de cor que os outros temas
+   têm, quem estrutura a tela é a diferença de luminância mais a borda.
+   ──────────────────────────────────────────────────────────────────────── */
+:root[data-theme="total-black"] {
+  --ink: #000000;
+  --prussian: #0d0d0d;
+  --dusk: #3d3d3d;
+  --lavender: #9a9a9a;
+  --alabaster: #ededed;
+
+  --accent: #7fd8ff;
+  --accent-dim: rgba(127, 216, 255, 0.14);
+  --accent-glow: rgba(127, 216, 255, 0.3);
+  --danger: #ff5a5f;
+  --live: #ffb340;
+
+  --level-0: #000000;
+  --level-1: #050505;
+  --level-2: #0d0d0d;
+  --level-3: #171717;
+  --glass: rgba(255, 255, 255, 0.05);
+
+  --line: rgba(255, 255, 255, 0.11);
+  --line-strong: rgba(255, 255, 255, 0.22);
+  --hover: rgba(255, 255, 255, 0.06);
 
   color-scheme: dark;
 }

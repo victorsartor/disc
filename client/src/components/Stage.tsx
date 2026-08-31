@@ -16,6 +16,50 @@ interface Props {
   onParar: (identity: string) => void;
   /** Sua própria tela, se você estiver compartilhando. */
   localScreen: MediaStreamTrack | null;
+  /** Quando a SUA transmissão começou. null = você não está compartilhando. */
+  shareStartedAt: number | null;
+}
+
+/**
+ * "07:12" até uma hora; "1:07:12" depois dela.
+ *
+ * Sem a casa da hora quando ela é zero: a maioria das transmissões dura
+ * minutos, e um "0:07:12" fixo gasta espaço com um dígito que quase nunca
+ * muda.
+ */
+function duracao(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const dd = (n: number) => String(n).padStart(2, '0');
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  return h > 0 ? `${h}:${dd(m)}:${dd(s)}` : `${dd(m)}:${dd(s)}`;
+}
+
+/**
+ * Há quanto tempo a live está no ar.
+ *
+ * `desde` já vem no relógio DESTA máquina — quem converte é o useRoom, a
+ * partir da duração que o transmissor anuncia. Aqui é só a diferença pra
+ * agora, de segundo em segundo.
+ *
+ * Componente próprio, e não um estado no Quadro, porque ele re-renderiza a
+ * cada segundo: isolado assim, o que volta a desenhar é este <span> — não o
+ * <video> ao lado dele.
+ */
+function Cronometro({ desde }: { desde: number }) {
+  const [agora, setAgora] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <span className="quadro__tempo" title="Tempo de transmissão">
+      {duracao(agora - desde)}
+    </span>
+  );
 }
 
 /** Quem está com a caixinha aberta, e em que ponto da tela ela nasceu. */
@@ -26,7 +70,7 @@ interface Aberto {
 }
 
 export function Stage({
-  screens, audios, screenVolumes, onScreenVolume, onParar, localScreen,
+  screens, audios, screenVolumes, onScreenVolume, onParar, localScreen, shareStartedAt,
 }: Props) {
   // Uma por vez: abrir noutro quadro fecha a anterior sozinho.
   const [aberto, setAberto] = useState<Aberto | null>(null);
@@ -76,6 +120,7 @@ export function Stage({
           key={s.identity}
           nome={s.name}
           track={s.track}
+          startedAt={s.startedAt}
           ampliado={Boolean(grande)}
           onAmpliar={() => setAmpliado(grande ? null : s.identity)}
           onParar={() => onParar(s.identity)}
@@ -83,7 +128,7 @@ export function Stage({
         />
       ))}
 
-      {localScreen && <MeuPreview track={localScreen} />}
+      {localScreen && <MeuPreview track={localScreen} startedAt={shareStartedAt} />}
 
       {aberto && (
         <ScreenVolume
@@ -116,10 +161,11 @@ export function Stage({
  * espalhá-los pela tela era o que deixava o clique longe do que ele afeta.
  */
 function Quadro({
-  nome, track, ampliado = false, onAmpliar, onParar, onVolume,
+  nome, track, startedAt, ampliado = false, onAmpliar, onParar, onVolume,
 }: {
   nome: string;
   track: RemoteTrack;
+  startedAt: number;
   ampliado?: boolean;
   onAmpliar: () => void;
   onParar: () => void;
@@ -168,6 +214,7 @@ function Quadro({
       <div className="quadro__label">
         <IconBroadcast size={13} />
         {nome}
+        <Cronometro desde={startedAt} />
       </div>
 
       {/* O clique nos botões não pode subir pro quadro: ele ampliaria a
@@ -201,7 +248,12 @@ function Quadro({
  * da mesma faixa que sobe pro servidor, então o que aparece aqui é
  * literalmente o que os outros recebem.
  */
-function MeuPreview({ track }: { track: MediaStreamTrack }) {
+function MeuPreview({
+  track, startedAt,
+}: {
+  track: MediaStreamTrack;
+  startedAt: number | null;
+}) {
   const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -217,7 +269,10 @@ function MeuPreview({ track }: { track: MediaStreamTrack }) {
     <div className="preview" title="O que você está compartilhando">
       {/* Mudo obrigatoriamente: é o som que já está saindo da sua máquina. */}
       <video ref={ref} autoPlay playsInline muted />
-      <div className="preview__label">Você está compartilhando</div>
+      <div className="preview__label">
+        Você está compartilhando
+        {startedAt !== null && <Cronometro desde={startedAt} />}
+      </div>
     </div>
   );
 }

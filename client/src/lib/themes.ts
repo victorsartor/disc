@@ -54,6 +54,20 @@ export const THEMES = [
     hint: 'roxo profundo',
     swatch: 'linear-gradient(145deg, #7b2cbf, #10002b)',
   },
+  {
+    id: 'rose',
+    name: 'Rosé',
+    hint: 'rosa pastel',
+    swatch: 'linear-gradient(145deg, #ffafcc, #241b26)',
+  },
+  {
+    id: 'total-black',
+    name: 'Total Black',
+    hint: 'preto absoluto (Amoled)',
+    // Sem gradiente até o preto puro: a bolinha ficaria um buraco no
+    // seletor. O degradê para no #101010 pra que a borda ainda se veja.
+    swatch: 'linear-gradient(145deg, #2a2a2a, #050505)',
+  },
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]['id'];

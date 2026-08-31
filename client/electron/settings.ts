@@ -43,6 +43,24 @@ export interface Settings {
   overlayY: number | null;
   /** Id de um dos temas em src/lib/themes.ts. Preferencia da maquina. */
   theme: string;
+  /**
+   * As tres cores do tema em vigor, em hex, gravadas pelo renderer a cada
+   * troca de tema.
+   *
+   * Nao sao fonte da verdade - o themes.css e. Elas existem porque a JANELA
+   * nasce antes do CSS: o BrowserWindow precisa de uma cor de fundo e de uma
+   * cor de barra de titulo no construtor, e ate a 0.26 essas duas eram o
+   * azul do Abissal, fixas. Em qualquer tema que nao fosse o padrao isso era
+   * um flash da cor errada em toda abertura - e no Total Black, um flash
+   * azul-marinho sobre um app preto.
+   *
+   * Guardar o valor JA RESOLVIDO (e nao o id do tema) evita duplicar a
+   * tabela de cores aqui dentro, que e o que faria o main e o CSS
+   * divergirem na primeira vez que uma cor mudasse.
+   */
+  themeBg: string;
+  themeBar: string;
+  themeSymbol: string;
 }
 
 const DEFAULTS: Settings = {
@@ -67,6 +85,10 @@ const DEFAULTS: Settings = {
   overlayX: null,
   overlayY: null,
   theme: 'abissal',
+  // Os do Abissal, que e o tema padrao. Valem so ate a primeira troca.
+  themeBg: '#0d1b2a',
+  themeBar: '#1b263b',
+  themeSymbol: '#e0e1dd',
 };
 
 let cache: Settings | null = null;
@@ -78,6 +100,13 @@ function percentual(v: unknown, padrao: number): number {
   const n = Number(v);
   if (!Number.isFinite(n)) return padrao;
   return Math.min(100, Math.max(0, Math.round(n)));
+}
+
+/** Um #rrggbb valido, ou o padrao. Usado na leitura; o patch tem o seu. */
+function cor(v: unknown, padrao: string): string {
+  return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v.trim())
+    ? v.trim()
+    : padrao;
 }
 
 export function getSettings(): Settings {
@@ -103,6 +132,13 @@ export function getSettings(): Settings {
       voiceVolume: percentual(raw.voiceVolume, DEFAULTS.voiceVolume),
       effectsVolume: percentual(raw.effectsVolume, DEFAULTS.effectsVolume),
       chatVolume: percentual(raw.chatVolume, DEFAULTS.chatVolume),
+      // Pelo mesmo motivo, e com uma consequencia pior: estas tres entram no
+      // construtor do BrowserWindow, e um valor invalido ali nao pinta
+      // errado - lanca antes de a janela existir. Um settings.json
+      // corrompido nao pode ser o motivo de o app nao abrir.
+      themeBg: cor(raw.themeBg, DEFAULTS.themeBg),
+      themeBar: cor(raw.themeBar, DEFAULTS.themeBar),
+      themeSymbol: cor(raw.themeSymbol, DEFAULTS.themeSymbol),
     };
   } catch {
     next = { ...DEFAULTS };
@@ -124,6 +160,7 @@ const ALLOWED_KEYS = new Set<keyof Settings>([
   'voiceVolume', 'effectsVolume', 'chatVolume',
   'screenAudioDeviceId',
   'overlayEnabled', 'overlayX', 'overlayY', 'theme',
+  'themeBg', 'themeBar', 'themeSymbol',
 ]);
 
 /**
@@ -138,6 +175,19 @@ const PERCENT_KEYS = new Set<keyof Settings>([
   'voiceVolume', 'effectsVolume', 'chatVolume',
 ]);
 
+/**
+ * Chaves que so aceitam #rrggbb.
+ *
+ * Pelo mesmo motivo das PERCENT_KEYS: do outro lado elas viram argumento do
+ * BrowserWindow e do setTitleBarOverlay, e ali um valor invalido nao pinta
+ * errado - lanca. Como o patch chega pelo IPC, a checagem mora aqui.
+ */
+const COLOR_KEYS = new Set<keyof Settings>([
+  'themeBg', 'themeBar', 'themeSymbol',
+]);
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
 export function sanitizePatch(input: unknown): Partial<Settings> {
   if (typeof input !== 'object' || input === null) return {};
   const out: Record<string, unknown> = {};
@@ -148,6 +198,11 @@ export function sanitizePatch(input: unknown): Partial<Settings> {
     if (PERCENT_KEYS.has(k as keyof Settings)) {
       if (!Number.isFinite(Number(v))) continue;
       out[k] = percentual(v, 100);
+      continue;
+    }
+    if (COLOR_KEYS.has(k as keyof Settings)) {
+      if (typeof v !== 'string' || !HEX.test(v.trim())) continue;
+      out[k] = v.trim();
       continue;
     }
     out[k] = v;

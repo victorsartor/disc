@@ -81,10 +81,16 @@ export function App() {
     // aviso, trocar pro Ártico deixaria três símbolos brancos sobre fundo
     // branco. Lemos o computado em vez de manter uma tabela de cores aqui,
     // pra que o themes.css continue sendo a única fonte da verdade.
+    //
+    // O --level-1 vai junto pelo mesmo motivo, mas pra outra hora: é o fundo
+    // que a JANELA usa, e ela nasce antes do CSS. O main guarda e usa na
+    // próxima abertura — sem isso, todo tema que não é o Abissal pisca azul
+    // ao abrir, e no Total Black o azul aparece sobre um app preto.
     const cores = getComputedStyle(document.documentElement);
-    const fundo = cores.getPropertyValue('--level-2').trim();
+    const barra = cores.getPropertyValue('--level-2').trim();
     const simbolo = cores.getPropertyValue('--alabaster').trim();
-    if (fundo && simbolo) void window.disc.titlebar(fundo, simbolo);
+    const janela = cores.getPropertyValue('--level-1').trim();
+    if (barra && simbolo) void window.disc.titlebar(barra, simbolo, janela || undefined);
   }, [theme, settingsCarregou]);
 
   const { channels: presence, users } = usePresence(Boolean(loggedIn), room.channelId);
@@ -281,6 +287,7 @@ export function App() {
           onScreenVolume={room.setScreenVolume}
           onParar={room.toggleAssistir}
           localScreen={room.localScreen}
+          shareStartedAt={room.shareStartedAt}
         />
         <Chat
           messages={messages}

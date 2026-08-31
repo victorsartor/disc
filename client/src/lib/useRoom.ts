@@ -39,6 +39,18 @@ export interface ScreenFeed {
   identity: string;
   name: string;
   track: RemoteTrack;
+  /**
+   * Quando a transmissao comecou, ja no SEU relogio.
+   *
+   * Nao e a hora em que voce assinou a faixa: quem entra 40 minutos depois
+   * veria 00:00, que e a informacao errada. O numero vem de quem
+   * compartilha, como DURACAO decorrida, e vira instante aqui - assim os
+   * relogios das duas maquinas nunca precisam bater. Ver announceState.
+   *
+   * Cai pra hora da assinatura quando o anuncio nao vem, que e o caso de
+   * quem ainda esta numa versao anterior a 0.27.
+   */
+  startedAt: number;
 }
 
 /**
@@ -215,6 +227,24 @@ export function useRoom(onChatMessage: (m: Message) => void) {
   /** identity -> ensurdecido, do que cada um anunciou. */
   const remoteDeafRef = useRef(new Map<string, boolean>());
 
+  /**
+   * Desde quando VOCE esta compartilhando, no seu relogio. null = nao esta.
+   *
+   * E o que vira o `sharingSince` do anuncio - e o anuncio manda a DURACAO,
+   * nao este instante. Ver announceState.
+   */
+  const sharingSinceRef = useRef<number | null>(null);
+
+  /**
+   * identity -> quando a transmissao daquela pessoa comecou, convertido pro
+   * SEU relogio.
+   *
+   * Vive fora do estado porque chega pelo anuncio, que pode vir antes ou
+   * depois da faixa de video ser assinada: quem chegar primeiro deixa aqui,
+   * e quem chegar depois encontra.
+   */
+  const remoteShareStartRef = useRef(new Map<string, number>());
+
   const [settings, setSettings] = useState<Settings | null>(null);
   const [channelId, setChannelId] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -229,6 +259,12 @@ export function useRoom(onChatMessage: (m: Message) => void) {
   const [sharing, setSharing] = useState(false);
   /** A sua propria tela, so pra você conferir o que esta mandando. */
   const [localScreen, setLocalScreen] = useState<MediaStreamTrack | null>(null);
+  /**
+   * O mesmo instante do sharingSinceRef, mas em estado - e so o preview que
+   * le, pra desenhar o cronometro. O ref existe em paralelo porque o
+   * announceState precisa do valor de agora sem se recriar a cada mudanca.
+   */
+  const [shareStartedAt, setShareStartedAt] = useState<number | null>(null);
   /**
    * Quais transmissoes voce escolheu assistir, no maximo MAX_ASSISTINDO.
    *
@@ -389,13 +425,29 @@ export function useRoom(onChatMessage: (m: Message) => void) {
    * que alguem entra (que e como quem chega depois descobre quem ja estava
    * ensurdecido). Se um anuncio se perder, o unico prejuizo e um icone
    * desatualizado - o audio de ninguem depende disso.
+   *
+   * O mesmo anuncio leva ha quanto tempo voce esta compartilhando, e por
+   * isso o cronometro da live pega carona nele: ele ja e reemitido quando
+   * alguem entra na sala, que e exatamente o momento em que um retardatario
+   * precisa do numero.
+   *
+   * Vai a DURACAO decorrida, nunca o instante em que comecou. Um timestamp
+   * so serviria se os relogios das duas maquinas batessem, e eles nao batem
+   * - a diferenca viraria um cronometro adiantado ou atrasado, do tamanho do
+   * desvio. Duracao nao depende de relogio nenhum.
    */
   const announceState = useCallback(() => {
     const room = roomRef.current;
     if (!room) return;
+
+    const desde = sharingSinceRef.current;
     room.localParticipant
       .publishData(
-        encoder.encode(JSON.stringify({ kind: 'state', deafened: deafenedRef.current })),
+        encoder.encode(JSON.stringify({
+          kind: 'state',
+          deafened: deafenedRef.current,
+          sharingSince: desde === null ? null : Date.now() - desde,
+        })),
         { reliable: true },
       )
       .catch(() => {
@@ -412,11 +464,14 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     micRef.current?.fechar();
     micRef.current = null;
     remoteDeafRef.current.clear();
+    remoteShareStartRef.current.clear();
+    sharingSinceRef.current = null;
     setChannelId(null);
     setPeers([]);
     setScreens([]);
     setAudios([]);
     setSharing(false);
+    setShareStartedAt(null);
   }, []);
 
   const connect = useCallback(
@@ -474,6 +529,12 @@ export function useRoom(onChatMessage: (m: Message) => void) {
           })
           .on(RoomEvent.ParticipantDisconnected, (p: RemoteParticipant) => {
             remoteDeafRef.current.delete(p.identity);
+            // Aqui, e nao no TrackUnsubscribed: parar de ASSISTIR alguem
+            // tambem desassina a faixa, e quem esta transmitindo ha meia hora
+            // continua transmitindo ha meia hora. Se apagasse ali, voltar a
+            // assistir recomecaria o cronometro do zero - e o proximo anuncio
+            // so viria quando alguem entrasse na sala.
+            remoteShareStartRef.current.delete(p.identity);
             playLeave();
             syncPeers();
           })
@@ -487,11 +548,14 @@ export function useRoom(onChatMessage: (m: Message) => void) {
             micRef.current?.fechar();
             micRef.current = null;
             remoteDeafRef.current.clear();
+            remoteShareStartRef.current.clear();
+            sharingSinceRef.current = null;
             setChannelId(null);
             setPeers([]);
             setScreens([]);
             setAudios([]);
             setSharing(false);
+            setShareStartedAt(null);
             // Aqui, e nao no disconnect() do hook: assim cobre tambem queda
             // de conexao e o servidor fechando a sala, nao so quem clicou
             // pra sair.
@@ -504,6 +568,28 @@ export function useRoom(onChatMessage: (m: Message) => void) {
                 chatCbRef.current(msg.message);
               } else if (msg?.kind === 'state' && from) {
                 remoteDeafRef.current.set(from.identity, Boolean(msg.deafened));
+
+                // Duracao decorrida vira instante NO NOSSO relogio. Um app
+                // anterior a 0.27 nao manda o campo: ai nao ha o que
+                // corrigir, e o quadro fica com a hora da assinatura.
+                if (typeof msg.sharingSince === 'number') {
+                  const inicio = Date.now() - msg.sharingSince;
+                  remoteShareStartRef.current.set(from.identity, inicio);
+                  // O quadro pode ja estar na tela: o anuncio chega depois
+                  // da faixa quando a pessoa ja estava compartilhando antes
+                  // de voce entrar. Sem isto, o cronometro dela so comecaria
+                  // do zero.
+                  setScreens((prev) =>
+                    prev.map((s) =>
+                      s.identity === from.identity && s.startedAt !== inicio
+                        ? { ...s, startedAt: inicio }
+                        : s,
+                    ),
+                  );
+                } else if (msg.sharingSince === null) {
+                  remoteShareStartRef.current.delete(from.identity);
+                }
+
                 syncPeers();
               }
             } catch {
@@ -541,7 +627,16 @@ export function useRoom(onChatMessage: (m: Message) => void) {
               if (track.source === Track.Source.ScreenShare) {
                 setScreens((prev) => [
                   ...prev.filter((s) => s.identity !== participant.identity),
-                  { identity: participant.identity, name: participant.name || participant.identity, track },
+                  {
+                    identity: participant.identity,
+                    name: participant.name || participant.identity,
+                    track,
+                    // Se o anuncio ja passou por aqui, ele sabe ha quanto
+                    // tempo a live esta no ar. Se nao, comeca agora - e o
+                    // anuncio seguinte corrige (ver DataReceived).
+                    startedAt:
+                      remoteShareStartRef.current.get(participant.identity) ?? Date.now(),
+                  },
                 ]);
                 playShareStart();
               }
@@ -763,9 +858,15 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     }
     setSharing(false);
     setLocalScreen(null);
+    sharingSinceRef.current = null;
+    setShareStartedAt(null);
+    // Avisa que parou: sem isto, o cronometro so sumiria da tela dos outros
+    // quando a faixa caisse, e o anuncio seguinte ainda diria que voce esta
+    // no ar ha meia hora.
+    announceState();
     playShareStop();
     syncPeers();
-  }, [syncPeers]);
+  }, [syncPeers, announceState]);
 
   /**
    * Abre a captura de tela.
@@ -858,9 +959,18 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     // segunda captura que poderia divergir.
     setLocalScreen(videoTrack);
     setSharing(true);
+
+    // O relogio comeca depois de a faixa subir, nao antes de abrir o
+    // seletor: o tempo que a pessoa levou escolhendo qual tela compartilhar
+    // nao e tempo de live.
+    const agora = Date.now();
+    sharingSinceRef.current = agora;
+    setShareStartedAt(agora);
+    announceState();
+
     playShareStart();
     syncPeers();
-  }, [syncPeers, stopShare]);
+  }, [syncPeers, stopShare, announceState]);
 
   // --- Chat --------------------------------------------------------------
   /**
@@ -1041,7 +1151,7 @@ export function useRoom(onChatMessage: (m: Message) => void) {
   return {
     settings, channelId, connecting, peers, screens, audios, screenVolumes,
     micOn: micLive, micWanted, pttDown, deafened, sharing, error, micLevel, ping,
-    localScreen, assistindo, toggleAssistir,
+    localScreen, shareStartedAt, assistindo, toggleAssistir,
     connect, disconnect, toggleMic, toggleDeafen, setPeerVolume, setScreenVolume,
     startShare, stopShare, broadcastChat, updateSettings,
   };

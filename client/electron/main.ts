@@ -145,12 +145,18 @@ if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
 const TITLEBAR_HEIGHT = 52;
 
 function createWindow(): void {
+  // As cores do tema que estava em vigor quando o app fechou. A janela nasce
+  // antes de o CSS existir, entao sem isto ela nasceria sempre no azul do
+  // Abissal - um flash da cor errada em todo tema que nao fosse o padrao, e
+  // um flash azul-marinho sobre um app preto no Total Black.
+  const tema = getSettings();
+
   win = new BrowserWindow({
     width: 1200,
     height: 780,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#0d1b2a',
+    backgroundColor: tema.themeBg,
     autoHideMenuBar: true,
     // Sem barra de titulo nativa: nome e icone do app saem, e ficam so os
     // tres botoes de janela, desenhados pelo Windows por cima do conteudo.
@@ -162,8 +168,8 @@ function createWindow(): void {
     // marcadas com -webkit-app-region no theme.css.
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#1b263b',       // --level-2 do tema padrao; troca com o tema
-      symbolColor: '#e0e1dd', // --alabaster
+      color: tema.themeBar,          // --level-2 do tema salvo
+      symbolColor: tema.themeSymbol, // --alabaster do tema salvo
       height: TITLEBAR_HEIGHT,
     },
     webPreferences: {
@@ -301,10 +307,20 @@ ipcMain.handle('auth:logout', () => {
  */
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
-ipcMain.handle('window:titlebar', (_e, color: unknown, symbolColor: unknown) => {
-  if (process.platform === 'darwin') return;
+ipcMain.handle('window:titlebar', (_e, color: unknown, symbolColor: unknown, bg: unknown) => {
   if (typeof color !== 'string' || typeof symbolColor !== 'string') return;
   if (!HEX.test(color) || !HEX.test(symbolColor)) return;
+
+  // Guarda ANTES de aplicar, e em toda plataforma: e daqui que a proxima
+  // abertura tira a cor da janela, e o backgroundColor nao e coisa do
+  // Windows. So a barra sobreposta e.
+  patchSettings({
+    themeBar: color,
+    themeSymbol: symbolColor,
+    ...(typeof bg === 'string' && HEX.test(bg) ? { themeBg: bg } : {}),
+  });
+
+  if (process.platform === 'darwin') return;
   try {
     win?.setTitleBarOverlay({ color, symbolColor, height: TITLEBAR_HEIGHT });
   } catch {

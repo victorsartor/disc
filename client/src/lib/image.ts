@@ -49,14 +49,103 @@ function loadBitmap(file: File): Promise<HTMLImageElement> {
 }
 
 /**
+ * Teto de imagem animada.
+ *
+ * Bem maior que o das outras porque esta é a única que sobe do jeito que
+ * saiu do disco: o canvas não pode encolher um GIF sem matar a animação
+ * junto, então não há como reduzir antes. O servidor barra no mesmo número.
+ */
+export const MAX_ANIMADA_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A imagem carrega animação?
+ *
+ * GIF sempre pode. WebP só na variante estendida com o bit de animação
+ * ligado — e por isso ele é conferido byte a byte, e não pelo mime: um WebP
+ * comum indo pelo caminho cru subiria em tamanho original à toa, perdendo o
+ * redimensionamento que ele podia muito bem ter recebido.
+ */
+export async function ehImagemAnimada(file: File): Promise<boolean> {
+  if (file.type === 'image/gif') return true;
+  if (file.type === 'image/webp') return ehWebpAnimado(file);
+  return false;
+}
+
+/**
+ * O cabeçalho de um WebP animado, byte a byte.
+ *
+ * "RIFF" nos 4 primeiros, "WEBP" no 8, e o fourcc do primeiro chunk no 12.
+ * Só o VP8X (a forma estendida) aceita animação; o byte 20 é o de flags, e
+ * o bit 0x02 dele é o ANIMATION. Nada disso precisa do arquivo inteiro —
+ * daí o slice de 21 bytes.
+ */
+async function ehWebpAnimado(file: File): Promise<boolean> {
+  try {
+    const head = new Uint8Array(await file.slice(0, 21).arrayBuffer());
+    if (head.length < 21) return false;
+
+    const marca = (i: number) => String.fromCharCode(...head.subarray(i, i + 4));
+    if (marca(0) !== 'RIFF' || marca(8) !== 'WEBP' || marca(12) !== 'VP8X') {
+      return false;
+    }
+    return (head[20] & 0x02) !== 0;
+  } catch {
+    // Arquivo que não deu pra ler não é animado — é problema, e o caminho
+    // normal vai reclamar dele com uma mensagem melhor que a daqui.
+    return false;
+  }
+}
+
+/**
+ * Os bytes originais, sem passar por canvas nenhum.
+ *
+ * O FileReader monta o data URL no formato exato que o servidor espera
+ * (`data:<mime>;base64,<...>`), e faz o base64 nativamente — a alternativa
+ * seria fatiar o arquivo à mão pra não estourar o limite de argumentos do
+ * String.fromCharCode.
+ */
+function dataUrlCru(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(new Error('não consegui ler essa imagem'));
+    r.readAsDataURL(file);
+  });
+}
+
+/** "8 MB", "1,4 MB" — só pra caber numa mensagem de erro. */
+function mb(bytes: number): string {
+  const v = bytes / 1024 / 1024;
+  return `${v.toFixed(v < 10 ? 1 : 0).replace('.', ',')} MB`;
+}
+
+/**
  * Corta no centro para a proporção pedida e reduz até caber em `maxW`.
  * Devolve um data URL JPEG — o mesmo recorte que a tela mostra depois,
  * então o que a pessoa escolheu é o que ela vai ver.
+ *
+ * Imagem animada é a exceção: ela sai daqui crua. Ver o desvio logo abaixo.
  */
 export async function prepareImage(
   file: File,
   { maxW, ratio, quality = 0.85 }: { maxW: number; ratio: number; quality?: number },
 ): Promise<string> {
+  // Animação não sobrevive ao canvas — ele desenha UM quadro, e o que
+  // chegaria no servidor seria o primeiro frame achatado. Então ela pula o
+  // redimensionamento inteiro e vai como está.
+  //
+  // O recorte centralizado some junto, mas ninguém perde nada: quem corta
+  // na tela já é o CSS. O .avatar tem object-fit: cover e a capa tem
+  // background-size: cover, então o enquadramento continua o mesmo.
+  if (await ehImagemAnimada(file)) {
+    if (file.size > MAX_ANIMADA_BYTES) {
+      throw new Error(
+        `Essa imagem animada tem ${mb(file.size)}. O limite é ${mb(MAX_ANIMADA_BYTES)}.`,
+      );
+    }
+    return dataUrlCru(file);
+  }
+
   const img = await loadBitmap(file);
 
   // Recorte centralizado na proporção de destino
@@ -97,6 +186,10 @@ export async function prepareImage(
  * PNG continua PNG. Reencodar print de tela em JPEG borra texto e linha
  * fina — é o formato errado pra imagem com aresta dura, e print é quase só
  * aresta dura. O custo é arquivo maior, e num anexo isso não importa.
+ *
+ * Imagem ANIMADA não chega aqui: o Chat manda ela pelo caminho do arquivo,
+ * que sobe por stream (ver o `escolher` em components/Chat.tsx). Se chegasse,
+ * sairia daqui com um quadro só — o canvas não sabe fazer diferente.
  */
 export async function prepareChatImage(
   file: File,

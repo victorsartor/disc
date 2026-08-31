@@ -164,6 +164,16 @@ export interface Settings {
   overlayY: number | null;
   /** Um dos ids de lib/themes.ts. Vale pra maquina, nao pra conta. */
   theme: string;
+  /**
+   * As cores já resolvidas do tema em vigor, gravadas a cada troca.
+   *
+   * O renderer não lê isto — quem lê é o processo main, ao criar a janela.
+   * Existem porque a janela nasce antes do CSS e precisa de uma cor de fundo
+   * no construtor. Ver o comentário em electron/settings.ts.
+   */
+  themeBg: string;
+  themeBar: string;
+  themeSymbol: string;
   /** Falso em Wayland e onde o hook global de teclado nao sobe. */
   pttAvailable: boolean;
 }
@@ -230,8 +240,12 @@ export interface DiscApi {
     /** dataUrl null remove: a capa some, a foto volta pra do Google. */
     image(kind: 'avatar' | 'banner', dataUrl: string | null): Promise<{ user: UserProfile }>;
   };
-  /** Cores dos botões de janela: a barra é do SO e não lê o CSS do tema. */
-  titlebar(color: string, symbolColor: string): Promise<void>;
+  /**
+   * Cores dos botões de janela: a barra é do SO e não lê o CSS do tema.
+   * `bg` (o --level-1) não muda nada agora — fica guardado pra próxima
+   * abertura, que é quando a cor errada apareceria como flash.
+   */
+  titlebar(color: string, symbolColor: string, bg?: string): Promise<void>;
   screenSources(): Promise<ScreenSource[]>;
   /** 'linux', 'win32', 'darwin' — decide quem desenha o seletor de tela. */
   platform: string;

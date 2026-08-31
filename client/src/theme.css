@@ -535,6 +535,21 @@ textarea {
   gap: 6px;
 }
 
+/* ── Cronômetro da live ──────────────────────────────────────────────────
+   Vem depois do nome, separado por um traço vertical em vez de espaço: o
+   nome tem largura variável e o tempo não, e sem a divisa os dois viravam
+   uma linha só de texto na leitura rápida.
+
+   `tabular-nums` porque o número muda a cada segundo: com dígitos de largura
+   variável a caixa inteira treme junto, e a tremida aparece mais que o
+   número. */
+.quadro__tempo {
+  padding-left: 6px;
+  border-left: 1px solid var(--line-strong);
+  color: var(--lavender);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Volume do som da tela ───────────────────────────────────────────────
    Menu de contexto: abre no botão direito, onde o cursor estiver. Antes era
    uma faixa colada no rodapé do quadro — longe de onde a mão está, e em cima
@@ -1814,6 +1829,15 @@ textarea {
   font-size: 10.5px;
   color: var(--lavender);
   background: var(--level-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* O mesmo cronômetro do quadro, na escala do preview. */
+.preview__label .quadro__tempo {
+  margin-left: auto;
+  padding-left: 6px;
 }
 
 /* ── Quadro de transmissão ───────────────────────────────────────────────
