@@ -12,6 +12,20 @@ export const MAX_BIO_LENGTH = 300;
 export const MAX_STATUS_LENGTH = 60;
 export const MAX_NAME_LENGTH = 32;
 
+/**
+ * Os efeitos de perfil que existem.
+ *
+ * Lista fechada, e é ela que decide — o valor vira nome de classe CSS do
+ * outro lado, e classe CSS montada com texto do usuário é como se escreve
+ * um seletor arbitrário no documento de todo mundo que abrir o cartão.
+ *
+ * Espelha o EFEITOS de client/src/lib/efeitos.ts. Os dois têm que andar
+ * juntos: aqui mora a permissão, lá mora a aparência.
+ */
+const PROFILE_EFFECTS = new Set([
+  'nenhum', 'brilho', 'parallax', 'pulso', 'granulado',
+]);
+
 /** Teto do arquivo já decodificado. O cliente redimensiona antes de mandar;
  *  isto é a rede de segurança contra quem falar com a API na mão. */
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
@@ -73,6 +87,11 @@ function publicProfile(u: User) {
     bannerUrl: u.banner_url,
     bio: u.bio ?? '',
     statusText: u.status_text ?? '',
+    /** Bruto, em ms. Quem escolhe como apresentar é a tela. */
+    voiceMs: u.voice_ms ?? 0,
+    // O ?? cobre a linha que existia antes da coluna: o DEFAULT do ALTER
+    // vale pra linha nova, mas um banco em uso pode devolver null aqui.
+    profileEffect: u.profile_effect ?? 'nenhum',
   };
 }
 
@@ -144,13 +163,19 @@ export function registerProfileRoutes(app: FastifyInstance): void {
       return reply.code(429).send({ error: 'devagar aí' });
     }
 
-    const { name, bio, statusText } = (req.body ?? {}) as {
+    const { name, bio, statusText, profileEffect } = (req.body ?? {}) as {
       name?: unknown;
       bio?: unknown;
       statusText?: unknown;
+      profileEffect?: unknown;
     };
 
-    const patch: { name?: string; bio?: string; statusText?: string } = {};
+    const patch: {
+      name?: string;
+      bio?: string;
+      statusText?: string;
+      profileEffect?: string;
+    } = {};
 
     if (name !== undefined) {
       if (typeof name !== 'string') return reply.code(400).send({ error: 'apelido inválido' });
@@ -168,6 +193,15 @@ export function registerProfileRoutes(app: FastifyInstance): void {
       }
       // Uma linha só: quebra de linha aqui vira layout torto na sidebar.
       patch.statusText = statusText.replace(/\s+/g, ' ').trim().slice(0, MAX_STATUS_LENGTH);
+    }
+    if (profileEffect !== undefined) {
+      // Contra a lista, não contra um formato. O valor vira nome de classe
+      // no cartão de todo mundo, então "parece um id" não basta — tem que
+      // ser um dos que existem.
+      if (typeof profileEffect !== 'string' || !PROFILE_EFFECTS.has(profileEffect)) {
+        return reply.code(400).send({ error: 'efeito inválido' });
+      }
+      patch.profileEffect = profileEffect;
     }
 
     return { user: publicProfile(patchProfile(me.id, patch)) };

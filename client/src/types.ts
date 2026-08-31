@@ -26,6 +26,16 @@ export interface UserProfile {
   bannerUrl: string | null;
   bio: string;
   statusText: string;
+  /**
+   * Tempo acumulado em sala de voz, em ms.
+   *
+   * Vem bruto de propósito: quem decide se isso vira "40 min" ou "67h" é a
+   * tela. Quem SOMA é o servidor, de 30 em 30 segundos, a partir do que o
+   * LiveKit responde — o cliente nunca reporta o próprio tempo.
+   */
+  voiceMs: number;
+  /** Um dos ids de lib/efeitos.ts. Ao contrário do tema, os outros veem. */
+  profileEffect: string;
 }
 
 /**
@@ -236,7 +246,12 @@ export interface DiscApi {
   profile: {
     /** Perfil de qualquer um, pela identity do LiveKit ou pelo id. */
     of(identity: string): Promise<{ user: UserProfile }>;
-    patch(patch: { name?: string; bio?: string; statusText?: string }): Promise<{ user: UserProfile }>;
+    patch(patch: {
+      name?: string;
+      bio?: string;
+      statusText?: string;
+      profileEffect?: string;
+    }): Promise<{ user: UserProfile }>;
     /** dataUrl null remove: a capa some, a foto volta pra do Google. */
     image(kind: 'avatar' | 'banner', dataUrl: string | null): Promise<{ user: UserProfile }>;
   };

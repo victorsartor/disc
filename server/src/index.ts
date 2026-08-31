@@ -10,6 +10,7 @@ import { rateLimit } from './ratelimit.js';
 import { presence, usersPresence, statusEfetivo } from './presence.js';
 import { registerProfileRoutes } from './profile.js';
 import { registerFileRoutes, paraCliente } from './arquivos.js';
+import { iniciarContagemDeTempo } from './tempo.js';
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL ?? 'info' },
@@ -231,6 +232,10 @@ const start = async () => {
   }
   await app.listen({ port: config.port, host: '0.0.0.0' });
   app.log.info(`allowlist: ${config.allowlist.length} e-mail(s)`);
+
+  // Depois do listen: o ticker fala com o LiveKit, e não há por que começar
+  // a bater lá antes de o servidor estar de pé pra ser útil.
+  iniciarContagemDeTempo();
 };
 
 start().catch((err) => {

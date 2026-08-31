@@ -418,3 +418,205 @@
   color: var(--accent);
   text-decoration: underline;
 }
+
+/* ── Efeitos de perfil ────────────────────────────────────────────────────
+   Cinco enfeites que a pessoa escolhe e TODO MUNDO vê — ao contrário do
+   tema, que é preferência de máquina. O id vem do servidor já validado
+   contra a lista fechada (ver classeDoEfeito em lib/efeitos.ts); aqui só
+   mora a aparência.
+
+   Tudo é CSS: nenhum asset, nenhuma biblioteca. Só o parallax precisa de
+   JavaScript, e mesmo ele só escreve duas variáveis — a transformação
+   continua sendo daqui.
+
+   Todos param sob prefers-reduced-motion, no fim do arquivo. Quem liga
+   isso no sistema tem que ver os perfis parados INCLUSIVE os dos outros: o
+   efeito é escolha de quem publica, mas o desconforto é de quem olha.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Contém a varredura e o granulado, que vazariam pra fora da capa. */
+.capa--brilho .capa__banner,
+.capa--granulado .capa__banner {
+  overflow: hidden;
+}
+
+/* ── Brilho: uma faixa de luz atravessa a capa na diagonal ─────────────── */
+.capa--brilho .capa__banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* Começa e termina transparente: sem isso, a faixa entra e sai como um
+     retângulo de borda dura em vez de um brilho. */
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.28) 50%,
+    transparent 65%
+  );
+  /* O dobro da largura, pra faixa ter de onde vir e pra onde ir. */
+  width: 200%;
+  left: -100%;
+  animation: capa-brilho 4.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes capa-brilho {
+  /* A pausa é o efeito: sem os 60% parados, vira um pisca-pisca contínuo
+     que cansa em dez segundos de perfil aberto. */
+  0%, 60% { transform: translateX(0); }
+  100% { transform: translateX(50%); }
+}
+
+/* ── Parallax: a capa se inclina seguindo o ponteiro ───────────────────── */
+.capa--parallax {
+  perspective: 800px;
+}
+
+.capa--parallax .capa__banner {
+  /* --px e --py vêm do useParallax, de -1 a 1, com zero no centro. O
+     fallback de 0 é o estado parado: sem ele, a capa nasceria torta até o
+     primeiro movimento do mouse. */
+  transform:
+    rotateY(calc(var(--px, 0) * 5deg))
+    rotateX(calc(var(--py, 0) * -5deg));
+  transition: transform 220ms ease-out;
+  will-change: transform;
+}
+
+/* ── Pulso: um anel do accent respirando em volta da foto ──────────────── */
+.capa--pulso .capa__foto .avatar {
+  animation: capa-pulso 2.4s ease-in-out infinite;
+}
+
+@keyframes capa-pulso {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { box-shadow: 0 0 0 10px transparent; }
+}
+
+/* ── Granulado: textura de filme por cima da capa ──────────────────────── */
+.capa--granulado .capa__banner::after {
+  content: '';
+  position: absolute;
+  /* Maior que a capa porque ele se desloca: com inset: 0 o canto ficaria
+     limpo no meio da animação. */
+  inset: -50%;
+  /* Ruído sem imagem: dois gradientes radiais minúsculos, repetidos. Custa
+     zero requisição e zero byte de asset. */
+  background-image:
+    radial-gradient(circle at 30% 40%, rgba(255, 255, 255, 0.14) 0.5px, transparent 0.6px),
+    radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.10) 0.5px, transparent 0.6px);
+  background-size: 3px 3px, 4px 4px;
+  animation: capa-granulado 700ms steps(4) infinite;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+@keyframes capa-granulado {
+  /* Deslocamentos curtos e em passos: o grão precisa PULAR de posição, não
+     deslizar — grão que desliza vira textura andando, não filme. */
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-2%, 1%); }
+  50% { transform: translate(1%, -2%); }
+  75% { transform: translate(2%, 2%); }
+  100% { transform: translate(0, 0); }
+}
+
+/* ── Bolinha do seletor ───────────────────────────────────────────────────
+   O efeito rodando em miniatura. É o único jeito honesto de escolher
+   movimento: uma amostra de cor não diria nada sobre o que vai acontecer.
+   ──────────────────────────────────────────────────────────────────────── */
+.efeito-previa {
+  position: relative;
+  overflow: hidden;
+  background: var(--level-3);
+  border: 1px solid var(--line);
+}
+
+.efeito-previa--brilho::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 200%;
+  left: -100%;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 65%
+  );
+  animation: capa-brilho 4.5s ease-in-out infinite;
+}
+
+.efeito-previa--parallax::after {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  border: 1px solid var(--lavender);
+  border-radius: 3px;
+  animation: previa-parallax 3s ease-in-out infinite;
+}
+
+@keyframes previa-parallax {
+  0%, 100% { transform: perspective(40px) rotateY(-14deg); }
+  50% { transform: perspective(40px) rotateY(14deg); }
+}
+
+.efeito-previa--pulso::after {
+  content: '';
+  position: absolute;
+  inset: 32%;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: capa-pulso 2.4s ease-in-out infinite;
+}
+
+.efeito-previa--granulado::after {
+  content: '';
+  position: absolute;
+  inset: -50%;
+  background-image:
+    radial-gradient(circle at 30% 40%, rgba(255, 255, 255, 0.3) 0.5px, transparent 0.6px),
+    radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.22) 0.5px, transparent 0.6px);
+  background-size: 3px 3px, 4px 4px;
+  animation: capa-granulado 700ms steps(4) infinite;
+}
+
+/* ── Tempo acumulado em call ─────────────────────────────────────────── */
+.profile__tempo {
+  margin: 0 20px 16px;
+  font-size: 13px;
+  color: var(--lavender);
+}
+
+.profile__tempo-valor {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Reduzir movimento ────────────────────────────────────────────────────
+   Não é só desligar a animação: o parallax precisa VOLTAR pro ângulo zero,
+   senão a capa fica congelada torta no último ângulo em que o ponteiro
+   passou antes de a preferência valer.
+   ──────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .capa--brilho .capa__banner::after,
+  .capa--granulado .capa__banner::after,
+  .capa--pulso .capa__foto .avatar,
+  .efeito-previa::after {
+    animation: none;
+  }
+
+  .capa--parallax .capa__banner {
+    transform: none;
+    transition: none;
+  }
+
+  /* O brilho e o granulado parados viram uma camada estática por cima da
+     foto — e uma faixa branca fixa atravessando a capa é pior que efeito
+     nenhum. Somem de vez. */
+  .capa--brilho .capa__banner::after,
+  .capa--granulado .capa__banner::after {
+    display: none;
+  }
+}

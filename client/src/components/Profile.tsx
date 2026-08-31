@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Me, UserProfile } from '../types';
 import { THEMES, type ThemeId } from '../lib/themes';
+import { EFEITOS, classeDoEfeito, type EfeitoId } from '../lib/efeitos';
 import {
   pickImageFile, prepareImage, AVATAR_SPEC, BANNER_SPEC,
 } from '../lib/image';
@@ -10,6 +11,21 @@ import { IconCamera, IconCheck, IconTrash } from './Icons';
 const MAX_BIO = 300;
 const MAX_STATUS = 60;
 const MAX_NAME = 32;
+
+/**
+ * O acumulado de call, do jeito que a frase pede.
+ *
+ * Abaixo de uma hora vai em minutos, porque "0h" pra quem entrou ontem
+ * parece que o contador está quebrado. Acima, horas cheias e nada de
+ * decimal: "passou mais de 67h" é a frase, e "67,4h" seria uma precisão
+ * que ninguém pediu num número que só cresce.
+ */
+export function tempoEmCall(ms: number): string {
+  const minutos = Math.floor(ms / 60_000);
+  if (minutos < 1) return 'menos de um minuto';
+  if (minutos < 60) return `${minutos} min`;
+  return `${Math.floor(minutos / 60).toLocaleString('pt-BR')}h`;
+}
 
 interface Props {
   me: Me;
@@ -34,6 +50,7 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
   const [statusText, setStatusText] = useState('');
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<'avatar' | 'banner' | null>(null);
+  const [salvandoEfeito, setSalvandoEfeito] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
   // Fica true quando o texto na tela deixa de ser o texto do servidor. É o
@@ -94,6 +111,31 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
     }
   };
 
+  /**
+   * Efeito salva na HORA, como a foto e o tema — e ao contrário do texto.
+   *
+   * A diferença é a mesma do resto da tela: efeito você julga vendo, e ver
+   * exige já ter aplicado. Não existe rascunho de movimento.
+   */
+  const trocarEfeito = async (efeito: EfeitoId) => {
+    if (user?.profileEffect === efeito) return;
+    setSalvandoEfeito(true);
+    setErro(null);
+    try {
+      const { user: novo } = await window.disc.profile.patch({ profileEffect: efeito });
+      // Só o `user`, e não o aplicar(): os campos de texto podem estar com
+      // rascunho, e escolher um efeito não pode jogar fora o que a pessoa
+      // estava escrevendo na bio. Escolher efeito é justamente uma atividade
+      // de ficar clicando pra ver qual fica melhor.
+      setUser(novo);
+      onSaved(novo);
+    } catch (err) {
+      setErro((err as Error).message || 'não consegui trocar o efeito');
+    } finally {
+      setSalvandoEfeito(false);
+    }
+  };
+
   const removerImagem = async (kind: 'avatar' | 'banner') => {
     setBusy(kind);
     setErro(null);
@@ -145,6 +187,7 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
             bannerUrl={user?.bannerUrl ?? null}
             avatarUrl={user?.avatarUrl ?? me.avatarUrl}
             name={user?.name ?? me.name}
+            efeito={user?.profileEffect}
             busy={busy}
             onPick={(kind) => void trocarImagem(kind)}
             onRemove={(kind) => void removerImagem(kind)}
@@ -168,6 +211,35 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
           </div>
 
           {erro && <p className="profile__erro">{erro}</p>}
+
+          {user && <TempoEmCall ms={user.voiceMs} />}
+
+          <section className="profile__card">
+            <div className="profile__card-head">
+              <h3 className="settings__title">Efeito do perfil</h3>
+              <span className="profile__contador">todo mundo vê</span>
+            </div>
+
+            <div className="temas">
+              {EFEITOS.map((e) => (
+                <button
+                  key={e.id}
+                  className={`tema${user?.profileEffect === e.id ? ' tema--ativo' : ''}`}
+                  onClick={() => void trocarEfeito(e.id)}
+                  aria-pressed={user?.profileEffect === e.id}
+                  disabled={!user || salvandoEfeito}
+                  title={`${e.name} — ${e.hint}`}
+                >
+                  {/* A bolinha mostra o efeito rodando, não uma cor: é o
+                      único jeito de escolher movimento sem aplicar antes. */}
+                  <span className={`tema__bola efeito-previa efeito-previa--${e.id}`}>
+                    {user?.profileEffect === e.id && <IconCheck size={18} />}
+                  </span>
+                  <span className="tema__nome">{e.name}</span>
+                </button>
+              ))}
+            </div>
+          </section>
 
           <section className="profile__card">
             <div className="profile__card-head">
@@ -220,17 +292,21 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
  * câmera, cada uma no seu canto.
  */
 function Cover({
-  bannerUrl, avatarUrl, name, busy, onPick, onRemove,
+  bannerUrl, avatarUrl, name, efeito, busy, onPick, onRemove,
 }: {
   bannerUrl: string | null;
   avatarUrl: string | null;
   name: string;
+  /** Id do efeito vindo do servidor. Validado antes de virar classe. */
+  efeito?: string;
   busy: 'avatar' | 'banner' | null;
   onPick: (kind: 'avatar' | 'banner') => void;
   onRemove: (kind: 'avatar' | 'banner') => void;
 }) {
+  const capaRef = useParallax(efeito);
+
   return (
-    <div className="capa">
+    <div className={`capa ${classeDoEfeito(efeito)}`.trim()} ref={capaRef}>
       <div
         className={`capa__banner${bannerUrl ? '' : ' capa__banner--vazio'}`}
         style={bannerUrl ? { backgroundImage: `url("${cssUrl(bannerUrl)}")` } : undefined}
@@ -273,12 +349,81 @@ function Cover({
 }
 
 /**
+ * O acumulado de horas em call.
+ *
+ * Some por completo enquanto ninguém tem tempo nenhum: uma faixa dizendo
+ * "0 min em chamadas" no cartão de quem acabou de entrar é ruído, não
+ * informação. Ela nasce sozinha assim que a pessoa passa o primeiro minuto.
+ *
+ * "Passou mais de" e não "passou": o número é somado de 30 em 30 segundos,
+ * então ele é um piso, não uma medida exata — e a frase diz isso em vez de
+ * fingir precisão.
+ */
+function TempoEmCall({ ms, nome }: { ms: number; nome?: string }) {
+  if (!ms || ms < 60_000) return null;
+
+  return (
+    <p className="profile__tempo">
+      <span className="profile__tempo-valor">{tempoEmCall(ms)}</span>
+      {nome ? ` — foi o que ${nome} passou em chamadas` : ' em chamadas até agora'}
+    </p>
+  );
+}
+
+/**
+ * O parallax da capa: o único efeito que precisa de JavaScript.
+ *
+ * Os outros quatro são keyframes puras. Este depende de ONDE o ponteiro
+ * está, então escuta o movimento e escreve duas variáveis que o CSS
+ * consome — o cálculo mora aqui, a aparência continua no profile.css.
+ *
+ * O listener é do ELEMENTO, não da window: fora do cartão não existe
+ * parallax pra atualizar, e um listener global rodaria a cada pixel do
+ * mouse na tela inteira. O cleanup é o que impede que abrir e fechar o
+ * perfil dez vezes deixe dez listeners pendurados.
+ *
+ * Quem liga "reduzir movimento" no sistema não ganha listener nenhum. O CSS
+ * já ignoraria as variáveis, e calcular pra ninguém é desperdício.
+ */
+function useParallax(efeito?: string) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || efeito !== 'parallax') return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const mover = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect();
+      // -1 a 1 nos dois eixos, com o centro da capa no zero.
+      el.style.setProperty('--px', (((e.clientX - r.left) / r.width) * 2 - 1).toFixed(3));
+      el.style.setProperty('--py', (((e.clientY - r.top) / r.height) * 2 - 1).toFixed(3));
+    };
+    // Sair sem zerar deixaria a capa torta no último ângulo pra sempre.
+    const sair = () => {
+      el.style.setProperty('--px', '0');
+      el.style.setProperty('--py', '0');
+    };
+
+    el.addEventListener('pointermove', mover);
+    el.addEventListener('pointerleave', sair);
+    return () => {
+      el.removeEventListener('pointermove', mover);
+      el.removeEventListener('pointerleave', sair);
+    };
+  }, [efeito]);
+
+  return ref;
+}
+
+/**
  * O cartão de quem não é você: só leitura, aberto ao clicar num nome.
  * O que dá pra fazer aqui é olhar — mexer no perfil dos outros não existe.
  */
 export function UserCard({ identity, onClose }: { identity: string; onClose: () => void }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [erro, setErro] = useState(false);
+  const capaRef = useParallax(user?.profileEffect);
 
   useEffect(() => {
     let vivo = true;
@@ -311,7 +456,7 @@ export function UserCard({ identity, onClose }: { identity: string; onClose: () 
           <div className="empty">Carregando...</div>
         ) : (
           <div className="profile__scroll">
-            <div className="capa">
+            <div className={`capa ${classeDoEfeito(user.profileEffect)}`.trim()} ref={capaRef}>
               <div
                 className={`capa__banner${user.bannerUrl ? '' : ' capa__banner--vazio'}`}
                 style={
@@ -329,6 +474,8 @@ export function UserCard({ identity, onClose }: { identity: string; onClose: () 
               <h2 className="profile__name">{user.name}</h2>
               {user.statusText && <p className="profile__recado">{user.statusText}</p>}
             </div>
+
+            <TempoEmCall ms={user.voiceMs} nome={user.name} />
 
             {user.bio && (
               <section className="profile__card">

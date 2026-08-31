@@ -87,6 +87,12 @@ for (const [name, decl] of [
   // last_active: última vez que a pessoa FALOU. É o relógio dos 5 minutos.
   ['last_seen', 'INTEGER'],
   ['last_active', 'INTEGER'],
+  // Tempo acumulado dentro de sala de voz, em ms. Quem soma é o ticker do
+  // tempo.ts, a partir do que o LiveKit responde — nunca o cliente.
+  ['voice_ms', 'INTEGER NOT NULL DEFAULT 0'],
+  // Enfeite de perfil que os OUTROS veem, ao contrário do tema (que é
+  // preferência de máquina e nem chega aqui). Um dos ids de EFEITOS.
+  ['profile_effect', "TEXT NOT NULL DEFAULT 'nenhum'"],
 ] as const) {
   if (!userColumns.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${decl}`);
 }
@@ -109,6 +115,10 @@ export interface User {
   status: StatusEscolhido;
   last_seen: number | null;
   last_active: number | null;
+  /** Tempo acumulado em sala de voz, em ms. Somado pelo ticker do tempo.ts. */
+  voice_ms: number;
+  /** Id de um dos efeitos de perfil. 'nenhum' quando não escolheu. */
+  profile_effect: string;
 }
 
 /** O que a pessoa pode escolher. 'invisivel' aparece como offline pros outros. */
@@ -176,6 +186,10 @@ const stmts = {
   updateStatusText: db.prepare('UPDATE users SET status_text = ? WHERE id = ?'),
   updateName: db.prepare('UPDATE users SET name = ?, name_custom = 1 WHERE id = ?'),
   updateStatus: db.prepare('UPDATE users SET status = ? WHERE id = ?'),
+  updateEffect: db.prepare('UPDATE users SET profile_effect = ? WHERE id = ?'),
+  // Soma em vez de escrever: dois ticks nunca disputam o mesmo valor lido,
+  // e um tick perdido custa 30s, não o acumulado inteiro.
+  addVoiceMs: db.prepare('UPDATE users SET voice_ms = voice_ms + ? WHERE id = ?'),
   touchSeen: db.prepare('UPDATE users SET last_seen = ? WHERE id = ?'),
   touchAtivo: db.prepare('UPDATE users SET last_seen = ?, last_active = ? WHERE id = ?'),
   todos: db.prepare('SELECT * FROM users'),
@@ -266,13 +280,26 @@ export function setBanner(userId: string, url: string | null): User {
 
 export function patchProfile(
   userId: string,
-  patch: { name?: string; bio?: string; statusText?: string },
+  patch: { name?: string; bio?: string; statusText?: string; profileEffect?: string },
 ): User {
   if (patch.name !== undefined) stmts.updateName.run(patch.name, userId);
   if (patch.bio !== undefined) stmts.updateBio.run(patch.bio, userId);
   if (patch.statusText !== undefined) stmts.updateStatusText.run(patch.statusText, userId);
+  if (patch.profileEffect !== undefined) stmts.updateEffect.run(patch.profileEffect, userId);
   return findUserById(userId)!;
 }
+
+/**
+ * Soma tempo de call a várias pessoas de uma vez.
+ *
+ * Numa transação porque é um tick só: ou o minuto conta pra todo mundo que
+ * estava na sala, ou não conta pra ninguém. Meio tick gravado seria uma
+ * diferença que ninguém tem como perceber depois — e a soma é justamente o
+ * tipo de número que só se descobre errado meses adiante.
+ */
+export const addVoiceTime = db.transaction((userIds: string[], ms: number): void => {
+  for (const id of userIds) stmts.addVoiceMs.run(ms, id);
+});
 
 export function saveImage(id: string, mime: string, bytes: Buffer): void {
   stmts.insertImage.run(id, mime, bytes, Date.now());
