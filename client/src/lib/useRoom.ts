@@ -214,11 +214,16 @@ function readAvatar(p: Participant): string | null {
   }
 }
 
-export function useRoom(onChatMessage: (m: Message) => void) {
+export function useRoom(
+  onChatMessage: (m: Message) => void,
+  onVoteChanged: (pollId: number) => void,
+) {
   const roomRef = useRef<Room | null>(null);
   const settingsRef = useRef<Settings | null>(null);
   const chatCbRef = useRef(onChatMessage);
   chatCbRef.current = onChatMessage;
+  const voteCbRef = useRef(onVoteChanged);
+  voteCbRef.current = onVoteChanged;
   // Refs porque os handlers de evento da sala capturam o valor do momento
   // em que a sala foi criada e ficariam com estado velho.
   const deafenedRef = useRef(false);
@@ -566,6 +571,12 @@ export function useRoom(onChatMessage: (m: Message) => void) {
               const msg = JSON.parse(decoder.decode(payload));
               if (msg?.kind === 'chat' && msg.message) {
                 chatCbRef.current(msg.message);
+              } else if (msg?.kind === 'vote' && typeof msg.pollId === 'number') {
+                // So o AVISO viaja, nunca a apuracao. Quem recebe pergunta
+                // ao servidor quanto ficou — somar um no numero que ja
+                // tinha deixaria dois apps com contas diferentes assim que
+                // um aviso se perdesse, e nada as reconciliaria depois.
+                voteCbRef.current(msg.pollId);
               } else if (msg?.kind === 'state' && from) {
                 remoteDeafRef.current.set(from.identity, Boolean(msg.deafened));
 
@@ -993,6 +1004,26 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     }
   }, []);
 
+  /**
+   * Avisa a sala que uma enquete mudou. So o id viaja.
+   *
+   * Mesma divisao do chat: isto e o caminho RAPIDO, pra quem esta na mesma
+   * sala de voz ver a barra mexer na hora. Quem esta fora recebe pelo
+   * polling de 3s do backend, que ja traz a apuracao junto das mensagens.
+   */
+  const broadcastVote = useCallback(async (pollId: number) => {
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      await room.localParticipant.publishData(
+        encoder.encode(JSON.stringify({ kind: 'vote', pollId })),
+        { reliable: true },
+      );
+    } catch {
+      /* sem sala ou sem permissao: o polling cobre */
+    }
+  }, []);
+
   // --- Quais telas assistir ----------------------------------------------
   /**
    * Liga e desliga a assinatura de cada tela conforme a escolha.
@@ -1153,6 +1184,6 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     micOn: micLive, micWanted, pttDown, deafened, sharing, error, micLevel, ping,
     localScreen, shareStartedAt, assistindo, toggleAssistir,
     connect, disconnect, toggleMic, toggleDeafen, setPeerVolume, setScreenVolume,
-    startShare, stopShare, broadcastChat, updateSettings,
+    startShare, stopShare, broadcastChat, broadcastVote, updateSettings,
   };
 }

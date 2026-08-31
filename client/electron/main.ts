@@ -344,7 +344,7 @@ ipcMain.handle('api:heartbeat', (_e, ativo: unknown) =>
   }));
 ipcMain.handle('api:set-status', (_e, status: unknown) =>
   apiFetch('/api/me/status', { method: 'PATCH', body: JSON.stringify({ status }) }));
-ipcMain.handle('api:send-message', (_e, body: string, attachmentId?: unknown) =>
+ipcMain.handle('api:send-message', (_e, body: string, attachmentId?: unknown, poll?: unknown) =>
   apiFetch('/api/messages', {
     method: 'POST',
     body: JSON.stringify({
@@ -352,7 +352,17 @@ ipcMain.handle('api:send-message', (_e, body: string, attachmentId?: unknown) =>
       // undefined some do JSON; mandar null faria o servidor recusar por
       // tipo, ja que la a checagem e `!== undefined`.
       attachmentId: typeof attachmentId === 'string' ? attachmentId : undefined,
+      // Repassado cru: quem valida pergunta e opcoes e o servidor, e
+      // duplicar a regra aqui so criaria duas versoes dela pra divergirem.
+      poll: poll ?? undefined,
     }),
+  }));
+ipcMain.handle('api:poll', (_e, id: unknown) =>
+  apiFetch(`/api/polls/${encodeURIComponent(String(id))}`));
+ipcMain.handle('api:poll-vote', (_e, id: unknown, options: unknown) =>
+  apiFetch(`/api/polls/${encodeURIComponent(String(id))}/vote`, {
+    method: 'PUT',
+    body: JSON.stringify({ options: Array.isArray(options) ? options : [] }),
   }));
 ipcMain.handle('api:room-token', (_e, channelId: string) =>
   apiFetch(`/api/rooms/${encodeURIComponent(channelId)}/token`, { method: 'POST' }));
@@ -520,10 +530,17 @@ const MAX_FILE_BYTES = 200 * 1024 * 1024;
 /**
  * Mime pela extensao.
  *
- * So precisa acertar imagem e audio: e isso que o servidor usa pra decidir
- * o que o chat desenha na conversa. Todo o resto ele trata como
+ * So precisa acertar imagem, audio e video: e isso que o servidor usa pra
+ * decidir o que o chat desenha na conversa. Todo o resto ele trata como
  * octet-stream de qualquer jeito, entao um .docx que nao esteja aqui nao
  * muda nada - vira cartao de download, que e o que ele seria mesmo.
+ *
+ * ESTA LISTA E METADE DA REGRA. A outra e o classificar() do servidor, e
+ * as duas precisam concordar: o arquivo sobe pelo CAMINHO, entao quem sabe
+ * o tipo e daqui - o servidor so ve os bytes e o mime que mandamos. Uma
+ * extensao que falte aqui vira octet-stream e cai em cartao de download por
+ * mais que o servidor saiba desenhar aquilo. Foi o que aconteceu com o
+ * .mp4 ate a 0.29.
  */
 const MIME_POR_EXT: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
@@ -531,6 +548,12 @@ const MIME_POR_EXT: Record<string, string> = {
   '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.oga': 'audio/ogg',
   '.opus': 'audio/ogg', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
   '.aac': 'audio/aac', '.flac': 'audio/flac', '.weba': 'audio/webm',
+  // Video. .ogv e o irmao de video do .ogg (que fica em audio, como deve).
+  // .mkv e .mov ficam de fora de proposito: o servidor os recusa como
+  // video porque o Chromium quase nunca toca o codec de dentro, e um
+  // retangulo preto e pior que um botao de baixar que funciona.
+  '.mp4': 'video/mp4', '.m4v': 'video/mp4',
+  '.webm': 'video/webm', '.ogv': 'video/ogg',
 };
 
 const mimeDoNome = (nome: string) =>

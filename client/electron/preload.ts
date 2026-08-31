@@ -32,8 +32,13 @@ const api = {
   presence: () => ipcRenderer.invoke('api:presence'),
   heartbeat: (ativo: boolean) => ipcRenderer.invoke('api:heartbeat', ativo),
   setStatus: (status: string) => ipcRenderer.invoke('api:set-status', status),
-  sendMessage: (body: string, attachmentId?: string) =>
-    ipcRenderer.invoke('api:send-message', body, attachmentId),
+  sendMessage: (body: string, attachmentId?: string, poll?: unknown) =>
+    ipcRenderer.invoke('api:send-message', body, attachmentId, poll),
+
+  polls: {
+    of: (id: number) => ipcRenderer.invoke('api:poll', id),
+    vote: (id: number, options: number[]) => ipcRenderer.invoke('api:poll-vote', id, options),
+  },
 
   arquivos: {
     enviar: (caminho: string) => ipcRenderer.invoke('api:upload-file', caminho),

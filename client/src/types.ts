@@ -41,12 +41,17 @@ export interface UserProfile {
 /**
  * Como o chat desenha o anexo. Vem decidido do servidor, não do mime.
  *
- * 'image' aparece na conversa e amplia no clique, 'audio' ganha um player,
- * 'file' vira cartão pra baixar. O servidor só marca image/audio pra
- * formato que ele mesmo se dispõe a servir com o content-type de verdade —
- * o resto cai em 'file' e desce como octet-stream.
+ * 'image' aparece na conversa e amplia no clique, 'audio' e 'video' ganham
+ * player, 'file' vira cartão pra baixar. O servidor só marca os três
+ * primeiros pra formato que ele mesmo se dispõe a servir com o
+ * content-type de verdade — o resto cai em 'file' e desce como
+ * octet-stream.
+ *
+ * O kind é gravado no upload, então vídeo mandado antes desta versão
+ * continua sendo cartão de download. É o comportamento certo: o que já foi
+ * mandado aparece como aparecia quando foi mandado.
  */
-export type AttachmentKind = 'image' | 'audio' | 'file';
+export type AttachmentKind = 'image' | 'audio' | 'video' | 'file';
 
 export interface Attachment {
   id: string;
@@ -63,6 +68,32 @@ export interface Attachment {
   url: string;
 }
 
+/**
+ * Uma opção da enquete, já apurada pelo servidor.
+ *
+ * `voters` traz os ids, não só a contagem: quem votou aparece. São seis
+ * pessoas — esconder isso seria atrito, não privacidade.
+ */
+export interface PollOption {
+  text: string;
+  voters: string[];
+}
+
+export interface Poll {
+  id: number;
+  question: string;
+  /** Verdadeiro quando dá pra marcar mais de uma opção. */
+  multi: boolean;
+  options: PollOption[];
+}
+
+/** A enquete como sai do formulário, antes de existir no servidor. */
+export interface NovaEnquete {
+  question: string;
+  options: string[];
+  multi: boolean;
+}
+
 export interface Message {
   id: number;
   body: string;
@@ -76,6 +107,14 @@ export interface Message {
    * opcional — quem lê precisa tratar undefined.
    */
   attachments?: Attachment[];
+  /**
+   * A enquete desta mensagem, com a apuração de quando a mensagem chegou.
+   *
+   * A apuração envelhece: quem vota depois muda o número, e o que
+   * reconcilia é o servidor (ver o refresh de enquete no App). Nunca somar
+   * voto no cliente a partir do que chegou pelo data channel.
+   */
+  poll?: Poll | null;
 }
 
 /**
@@ -223,7 +262,23 @@ export interface DiscApi {
   /** Batimento do app aberto. `ativo` renova o relógio dos 10 minutos. */
   heartbeat(ativo: boolean): Promise<{ status: StatusEfetivo }>;
   setStatus(status: StatusEscolhido): Promise<{ status: StatusEscolhido }>;
-  sendMessage(body: string, attachmentId?: string): Promise<{ message: Message }>;
+  sendMessage(
+    body: string,
+    attachmentId?: string,
+    poll?: NovaEnquete,
+  ): Promise<{ message: Message }>;
+  polls: {
+    /**
+     * A apuração de agora. Serve o aviso de voto do data channel: quem
+     * recebe PERGUNTA quanto ficou em vez de somar um no que já tinha.
+     */
+    of(id: number): Promise<{ poll: Poll }>;
+    /**
+     * Manda o conjunto INTEIRO de opções marcadas, não um voto avulso.
+     * Lista vazia desmarca. A resposta já vem com a apuração nova.
+     */
+    vote(id: number, options: number[]): Promise<{ poll: Poll }>;
+  };
   arquivos: {
     /**
      * Sobe um arquivo do disco pelo CAMINHO, não pelos bytes.

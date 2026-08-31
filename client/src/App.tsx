@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Me, Message, UserProfile } from './types';
+import type { Me, Message, NovaEnquete, Poll, UserProfile } from './types';
 import { MAX_ASSISTINDO, useRoom } from './lib/useRoom';
 import { usePresence, useStatus } from './lib/usePresence';
 import { useUpdate, blocksApp } from './lib/useUpdate';
@@ -55,7 +55,61 @@ export function App() {
     if (historicoCarregadoRef.current && m.user_id !== meRef.current?.id) playNotify();
   }, []);
 
-  const room = useRoom(addMessage);
+  /**
+   * Guarda uma apuração nova na mensagem que carrega a enquete.
+   *
+   * Mexe só no `poll` da mensagem, e não na lista: o addMessage ignora id
+   * já visto (é o que impede o data channel e o polling de duplicarem), e
+   * uma enquete muda muitas vezes depois de a mensagem ter chegado.
+   */
+  const aplicarPoll = useCallback((poll: Poll) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.poll?.id === poll.id ? { ...m, poll } : m)),
+    );
+  }, []);
+
+  /**
+   * Alguém votou numa enquete: pergunta ao servidor como ficou.
+   *
+   * Nunca somar a partir do aviso. O aviso diz QUE mudou, não QUANTO — um
+   * que se perdesse no caminho deixaria este app com um número a menos pra
+   * sempre, sem nada que o corrigisse até alguém reabrir o app.
+   */
+  /**
+   * Aplica as apurações que vieram junto do polling de mensagens.
+   *
+   * Só troca o objeto quando a apuração mudou de verdade. Sem essa
+   * comparação, a cada 3 segundos a lista inteira de mensagens viraria
+   * objetos novos e o chat re-renderizaria sozinho para sempre — inclusive
+   * enquanto ninguém está votando em nada.
+   */
+  const sincronizarPolls = useCallback((chegaram: Message[]) => {
+    const novas = new Map<number, Poll>();
+    for (const m of chegaram) if (m.poll) novas.set(m.poll.id, m.poll);
+    if (novas.size === 0) return;
+
+    setMessages((prev) => {
+      let mudou = false;
+      const proximo = prev.map((m) => {
+        const nova = m.poll ? novas.get(m.poll.id) : undefined;
+        if (!nova || JSON.stringify(nova) === JSON.stringify(m.poll)) return m;
+        mudou = true;
+        return { ...m, poll: nova };
+      });
+      return mudou ? proximo : prev;
+    });
+  }, []);
+
+  const recontarPoll = useCallback((pollId: number) => {
+    window.disc.polls
+      .of(pollId)
+      .then(({ poll }) => aplicarPoll(poll))
+      .catch(() => {
+        /* enquete apagada ou rede caindo: o polling de 3s corrige */
+      });
+  }, [aplicarPoll]);
+
+  const room = useRoom(addMessage, recontarPoll);
 
   // O tema mora nas configurações da máquina e vale pro documento inteiro:
   // quem pinta é o CSS, a partir deste atributo no <html>.
@@ -152,6 +206,11 @@ export function App() {
         const { messages } = await window.disc.messages();
         if (!alive) return;
         for (const m of messages) addMessage(m);
+        // As enquetes precisam de uma segunda passada: o addMessage ignora
+        // mensagem já vista, e é justamente a apuração de uma mensagem
+        // ANTIGA que muda quando alguém vota. Este é o caminho de quem não
+        // está na mesma sala de voz — o data channel só alcança quem está.
+        sincronizarPolls(messages);
       } catch {
         /* offline momentâneo: a próxima volta pega */
       } finally {
@@ -167,13 +226,30 @@ export function App() {
       alive = false;
       clearInterval(id);
     };
-  }, [loggedIn, addMessage]);
+  }, [loggedIn, addMessage, sincronizarPolls]);
 
-  const sendChat = useCallback(async (body: string, attachmentId?: string) => {
-    const { message } = await window.disc.sendMessage(body, attachmentId);
+  const sendChat = useCallback(async (
+    body: string,
+    attachmentId?: string,
+    poll?: NovaEnquete,
+  ) => {
+    const { message } = await window.disc.sendMessage(body, attachmentId, poll);
     addMessage(message);
     await room.broadcastChat(message);
   }, [addMessage, room]);
+
+  /**
+   * O nome de quem votou. 'Você' pra si mesmo — na lista de uma opção,
+   * ler o próprio nome em terceira pessoa é estranho.
+   *
+   * Sai da presença, que já traz todo mundo do servidor (não só quem está
+   * em call). Quem não estiver lá é gente que saiu da allowlist: o voto
+   * continua contando, só perde o nome.
+   */
+  const nomeDe = useCallback((id: string) => {
+    if (id === me?.id) return 'Você';
+    return users.find((u) => u.identity === id)?.name ?? 'alguém';
+  }, [users, me?.id]);
 
   // Espelha o estado da sala no overlay
   const activeName = me?.channels.find((c) => c.id === room.channelId)?.name ?? null;
@@ -294,6 +370,10 @@ export function App() {
           onSend={sendChat}
           onOpenUser={openUser}
           chatVolume={room.settings?.chatVolume ?? 100}
+          meId={me.id}
+          nomeDe={nomeDe}
+          onApurarPoll={aplicarPoll}
+          onVotou={room.broadcastVote}
         />
       </div>
 

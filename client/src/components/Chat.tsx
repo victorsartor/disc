@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import type { Attachment, Message } from '../types';
+import type { Attachment, Message, NovaEnquete, Poll } from '../types';
 import { Avatar } from './Profile';
 import { Anexo, Lightbox, tamanhoLegivel } from './Anexo';
-import { IconClipe, IconClose } from './Icons';
+import { Enquete, NovaEnqueteForm } from './Enquete';
+import { IconClipe, IconClose, IconDescer, IconEnquete } from './Icons';
 import { ehImagemAnimada, prepareChatImage } from '../lib/image';
 
 const timeFmt = new Intl.DateTimeFormat('pt-BR', {
@@ -31,19 +32,37 @@ const MAX_BYTES = 200 * 1024 * 1024;
 
 interface Props {
   messages: Message[];
-  onSend: (body: string, attachmentId?: string) => Promise<void>;
+  onSend: (body: string, attachmentId?: string, poll?: NovaEnquete) => Promise<void>;
   /** Clicar na foto ou no nome de quem escreveu abre o perfil da pessoa. */
   onOpenUser: (identity: string) => void;
   /** Volume dos áudios do chat, 0 a 100. Vem das configurações. */
   chatVolume: number;
+  /** Pra saber em que opção da enquete VOCÊ votou. */
+  meId: string;
+  /** Como mostrar quem votou. 'Você' pra si mesmo. */
+  nomeDe: (id: string) => string;
+  /** Guarda a apuração nova que o servidor devolveu depois de um voto. */
+  onApurarPoll: (poll: Poll) => void;
+  /** Avisa a sala que o voto mudou, pra quem está nela reconsultar. */
+  onVotou: (pollId: number) => void;
 }
 
-export function Chat({ messages, onSend, onOpenUser, chatVolume }: Props) {
+export function Chat({
+  messages, onSend, onOpenUser, chatVolume, meId, nomeDe, onApurarPoll, onVotou,
+}: Props) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const listaRef = useRef<HTMLDivElement>(null);
+  /** Preso no fim. Só um gesto da PESSOA solta — ver conferirPino. */
   const pinnedRef = useRef(true);
+  /** Instante do último gesto de rolagem feito pela pessoa. */
+  const gestoRef = useRef(0);
+  /** Espelho do pino pra tela: é ele que mostra o botão de descer. */
+  const [noFim, setNoFim] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
+  /** Aberto = o formulário de enquete no lugar da caixa de texto. */
+  const [enquetando, setEnquetando] = useState(false);
 
   /** Já subiu e está esperando a mensagem que vai carregá-lo. */
   const [pendente, setPendente] = useState<Attachment | null>(null);
@@ -100,12 +119,94 @@ export function Chat({ messages, onSend, onOpenUser, chatVolume }: Props) {
     }
   };
 
-  // Só rola sozinho se o usuário já estava no fim. Senão atrapalha
-  // quem está lendo histórico enquanto a conversa continua.
+  const irAoFim = () => {
+    const el = logRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    pinnedRef.current = true;
+    setNoFim(true);
+  };
+
+  /**
+   * Recalcula o pino — e SÓ a partir de um gesto da pessoa.
+   *
+   * Aqui estava o bug de abrir o app numa mensagem antiga, e ele é mais
+   * sutil do que parece. O pino morava no onScroll: "se o scroll não está
+   * no fim, a pessoa subiu". Só que o scroll se mexe sozinho o tempo todo
+   * durante a abertura — uma foto que carrega, um vídeo que descobre a
+   * própria altura, a fonte que troca, o ancoramento de rolagem do
+   * Chromium. Qualquer um desses eventos soltava o pino sem ninguém ter
+   * tocado em nada, e a partir dali nada mais trazia a conversa pro fim.
+   *
+   * Exigir um gesto separa as duas coisas na origem, em vez de tentar
+   * adivinhar pela geometria: roda do mouse, arrastar a barra, tecla,
+   * toque. Conteúdo crescendo não é gesto.
+   */
+  const conferirPino = () => {
+    const el = logRef.current;
+    if (!el) return;
+    const preso = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    pinnedRef.current = preso;
+    setNoFim((antes) => (antes === preso ? antes : preso));
+  };
+
+  const marcarGesto = () => {
+    gestoRef.current = Date.now();
+  };
+
+  /**
+   * Manter a conversa no fim — observando o TAMANHO da lista, não a
+   * chegada de mensagem.
+   *
+   * Observar `messages.length` não bastava: quando o efeito rodava, as
+   * fotos ainda não tinham carregado. Uma <img> sem bytes ocupa altura
+   * zero, então rolávamos até o fim de uma lista que ainda ia crescer.
+   *
+   * O ResizeObserver pega qualquer coisa que mude a altura — foto, vídeo,
+   * fonte, janela mudando de largura, mensagem nova — e já dispara uma vez
+   * ao começar a observar, o que cobre a primeira pintura.
+   */
+  useLayoutEffect(() => {
+    const el = logRef.current;
+    const lista = listaRef.current;
+    if (!el || !lista) return;
+
+    const observador = new ResizeObserver(() => {
+      if (pinnedRef.current) el.scrollTop = el.scrollHeight;
+    });
+    observador.observe(lista);
+    return () => observador.disconnect();
+  }, []);
+
+  // Cinto e suspensório do anterior: se por algum motivo a lista crescer
+  // sem o observador ver, mensagem nova ainda traz pro fim.
   useLayoutEffect(() => {
     const el = logRef.current;
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
   }, [messages.length]);
+
+  /**
+   * Cria a enquete como uma mensagem sem corpo.
+   *
+   * A pergunta É o texto do balão — repeti-la no corpo só daria a mesma
+   * frase duas vezes, uma acima da outra.
+   */
+  const criarEnquete = async (enquete: NovaEnquete) => {
+    if (sending) return;
+    setSending(true);
+    setErro(null);
+    try {
+      await onSend('', undefined, enquete);
+      setEnquetando(false);
+      pinnedRef.current = true;
+      setNoFim(true);
+    } catch (err) {
+      console.error(err);
+      setErro('Não consegui criar a enquete.');
+    } finally {
+      setSending(false);
+    }
+  };
 
   const send = async () => {
     const text = draft.trim();
@@ -118,6 +219,7 @@ export function Chat({ messages, onSend, onOpenUser, chatVolume }: Props) {
       setDraft('');
       setPendente(null);
       pinnedRef.current = true;
+      setNoFim(true);
     } catch (err) {
       console.error(err);
       setErro('Não consegui mandar a mensagem.');
@@ -131,11 +233,28 @@ export function Chat({ messages, onSend, onOpenUser, chatVolume }: Props) {
       <div
         className="chat__log"
         ref={logRef}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+        // Os quatro jeitos de rolar de propósito. Marcam o instante; quem
+        // decide o pino é o onScroll logo abaixo, mas só dentro da janela
+        // que estes gestos abrem.
+        onWheel={marcarGesto}
+        onPointerDown={marcarGesto}
+        onTouchStart={marcarGesto}
+        onKeyDown={marcarGesto}
+        onScroll={() => {
+          // 1,5s cobre a inércia da roda e o arrastar da barra, que
+          // continuam gerando scroll depois do gesto ter acabado. Fora
+          // dessa janela, quem mexeu no scroll foi o conteúdo — e conteúdo
+          // não decide se a pessoa quer ou não estar lendo o histórico.
+          if (Date.now() - gestoRef.current > 1500) return;
+          conferirPino();
         }}
       >
+        {/* A lista é um elemento à parte do container que rola porque é o
+            TAMANHO DELA que o ResizeObserver precisa ver. Observar o
+            .chat__log só mostraria a altura da janela, que não muda quando
+            uma foto termina de carregar — justamente o momento em que o fim
+            da conversa se desloca. */}
+        <div className="chat__lista" ref={listaRef}>
         {messages.length === 0 ? (
           <div className="empty">Ninguém falou nada ainda.</div>
         ) : (
@@ -198,12 +317,32 @@ export function Chat({ messages, onSend, onOpenUser, chatVolume }: Props) {
                       onAmpliar={setAmpliada}
                     />
                   ))}
+                  {m.poll && (
+                    <Enquete
+                      poll={m.poll}
+                      meId={meId}
+                      nomeDe={nomeDe}
+                      onApurar={onApurarPoll}
+                      onVotou={onVotou}
+                    />
+                  )}
                 </div>
               </div>
             );
           })
         )}
+        </div>
       </div>
+
+      {/* Aparece só quando a conversa NÃO está no fim. Além de ser o
+          atalho óbvio pra voltar, ele torna o estado visível: se o botão
+          está na tela, o pino está solto — que era exatamente o que não
+          dava pra ver quando o chat abria fora do fim. */}
+      {!noFim && (
+        <button className="chat__descer" onClick={irAoFim} title="Ir pro fim da conversa">
+          <IconDescer size={16} />
+        </button>
+      )}
 
       {ampliada && <Lightbox anexo={ampliada} onFechar={() => setAmpliada(null)} />}
 
@@ -235,45 +374,65 @@ export function Chat({ messages, onSend, onOpenUser, chatVolume }: Props) {
           </div>
         )}
 
-        <div className="chat__linha">
-          {/* O input fica escondido: quem aparece é o botão do clipe, que
-              casa com o resto da interface. */}
-          <input
-            ref={fileRef}
-            type="file"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              // Zera pra que escolher o MESMO arquivo de novo dispare o
-              // change outra vez — sem isso, tirar e repor não funciona.
-              e.target.value = '';
-              if (f) void escolher(f);
-            }}
+        {/* O formulário TOMA O LUGAR da caixa de texto em vez de aparecer
+            junto: com os dois na tela existiriam dois botões de mandar, e
+            nenhuma pista de qual deles vale. */}
+        {enquetando ? (
+          <NovaEnqueteForm
+            ocupado={sending}
+            onCriar={(e) => void criarEnquete(e)}
+            onCancelar={() => setEnquetando(false)}
           />
-          <button
-            className="chat__clipe"
-            onClick={() => fileRef.current?.click()}
-            disabled={subindo || Boolean(pendente)}
-            title={pendente ? 'Já tem um anexo nesta mensagem' : 'Anexar arquivo'}
-          >
-            <IconClipe size={18} />
-          </button>
+        ) : (
+          <div className="chat__linha">
+            {/* O input fica escondido: quem aparece é o botão do clipe, que
+                casa com o resto da interface. */}
+            <input
+              ref={fileRef}
+              type="file"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                // Zera pra que escolher o MESMO arquivo de novo dispare o
+                // change outra vez — sem isso, tirar e repor não funciona.
+                e.target.value = '';
+                if (f) void escolher(f);
+              }}
+            />
+            <button
+              className="chat__clipe"
+              onClick={() => fileRef.current?.click()}
+              disabled={subindo || Boolean(pendente)}
+              title={pendente ? 'Já tem um anexo nesta mensagem' : 'Anexar arquivo'}
+            >
+              <IconClipe size={18} />
+            </button>
 
-          <textarea
-            className="chat__input"
-            rows={1}
-            placeholder={pendente ? 'Legenda (opcional)...' : 'Escreve aqui...'}
-            value={draft}
-            maxLength={2000}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-          />
-        </div>
+            <button
+              className="chat__clipe"
+              onClick={() => setEnquetando(true)}
+              disabled={subindo || Boolean(pendente)}
+              title={pendente ? 'Tire o anexo primeiro' : 'Criar enquete'}
+            >
+              <IconEnquete size={18} />
+            </button>
+
+            <textarea
+              className="chat__input"
+              rows={1}
+              placeholder={pendente ? 'Legenda (opcional)...' : 'Escreve aqui...'}
+              value={draft}
+              maxLength={2000}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

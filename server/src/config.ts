@@ -71,6 +71,18 @@ export function isValidChannel(id: string): id is ChannelId {
 
 export const MAX_MESSAGE_LENGTH = 2000;
 
+/**
+ * Enquete: os limites da pergunta e das opções.
+ *
+ * O mínimo de 2 opções é o que separa uma enquete de um anúncio. O máximo
+ * de 6 é a leitura: acima disso as barras ficam finas demais pra comparar
+ * de relance, que é a única coisa que uma enquete precisa fazer bem.
+ */
+export const MAX_POLL_QUESTION = 200;
+export const MAX_POLL_OPTION = 80;
+export const MIN_POLL_OPTIONS = 2;
+export const MAX_POLL_OPTIONS = 6;
+
 /** Teto de um anexo. O cliente também barra antes de subir; aqui é a rede. */
 export const MAX_FILE_BYTES = 200 * 1024 * 1024;
 

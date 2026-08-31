@@ -627,12 +627,46 @@ textarea {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Âncora do botão de descer, que flutua por cima da conversa. */
+  position: relative;
+}
+
+/* Só aparece quando a conversa não está no fim — ver o `noFim` no
+   Chat.tsx. Fica acima da caixa de texto, encostado à direita. */
+.chat__descer {
+  position: absolute;
+  right: 20px;
+  bottom: 72px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--alabaster);
+  background: var(--level-3);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 35%);
+  transition: background 0.13s, border-color 0.13s;
+}
+
+.chat__descer:hover {
+  background: var(--hover);
+  border-color: var(--accent);
 }
 
 .chat__log {
   flex: 1;
   overflow-y: auto;
   padding: 16px 12px;
+}
+
+/* A lista é separada do container que rola porque é o TAMANHO DELA que o
+   ResizeObserver do Chat.tsx observa. O .chat__log tem sempre a altura da
+   janela — não muda quando uma foto termina de carregar, que é justamente
+   o momento em que o fim da conversa se desloca. */
+.chat__lista {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -869,6 +903,23 @@ textarea {
   height: 36px;
 }
 
+.anexo--video {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.anexo__video {
+  width: 100%;
+  /* Mesmo teto da foto, e pela mesma razão: um vídeo em pé não pode
+     empurrar a conversa inteira pra fora da tela. O controle de tela cheia
+     do próprio player resolve pra quem quiser ver grande. */
+  max-height: 320px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: #000;
+}
+
 .anexo--arquivo {
   display: flex;
   align-items: center;
@@ -918,6 +969,253 @@ textarea {
   font-size: 11px;
   color: var(--lavender);
   font-variant-numeric: tabular-nums;
+}
+
+/* ── Enquete ─────────────────────────────────────────────────────────────
+   Uma enquete é uma mensagem com um lado: mora dentro do .msg__body, do
+   mesmo jeito que o anexo, e por isso não repete foto nem nome.           */
+.enquete {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+  margin-top: 4px;
+  padding: 12px;
+  background: var(--level-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.enquete__pergunta {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--alabaster);
+  line-height: 1.35;
+}
+
+.enquete__opcoes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.enquete__opcao {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--level-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.13s;
+}
+
+.enquete__opcao:hover:not(:disabled) {
+  border-color: var(--dusk);
+}
+
+.enquete__opcao:disabled {
+  cursor: default;
+}
+
+.enquete__opcao--minha {
+  border-color: var(--accent);
+}
+
+/* A barra é irmã do conteúdo e não fundo dele: assim a largura anima
+   sozinha sem arrastar o texto junto. Fica atrás por z-index, e o
+   conteúdo sobe pra frente com position: relative. */
+.enquete__barra {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent-dim);
+  transition: width 0.25s ease-out;
+  pointer-events: none;
+}
+
+.enquete__opcao--minha .enquete__barra {
+  background: var(--accent-glow);
+}
+
+.enquete__linha {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.enquete__texto {
+  font-size: 13px;
+  color: var(--alabaster);
+  overflow-wrap: anywhere;
+}
+
+.enquete__num {
+  font-size: 12px;
+  color: var(--lavender);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.enquete__quem {
+  position: relative;
+  font-size: 11px;
+  color: var(--lavender);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enquete__rodape {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--lavender);
+}
+
+.enquete__dica::before {
+  content: '·';
+  margin-right: 8px;
+}
+
+.enquete__erro {
+  color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enquete__barra {
+    transition: none;
+  }
+}
+
+/* ── Formulário de nova enquete ─────────────────────────────────────────
+   Toma o lugar da caixa de texto enquanto está aberto — ver Chat.tsx.    */
+.nova-enquete {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--level-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.nova-enquete__topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nova-enquete__titulo {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lavender);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.nova-enquete__x {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  color: var(--lavender);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.13s, background 0.13s;
+}
+
+.nova-enquete__x:hover {
+  color: var(--alabaster);
+  background: var(--hover);
+}
+
+.nova-enquete__pergunta,
+.nova-enquete__campo {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--level-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--alabaster);
+  font: inherit;
+  font-size: 13px;
+}
+
+.nova-enquete__pergunta {
+  font-weight: 600;
+}
+
+.nova-enquete__pergunta:focus,
+.nova-enquete__campo:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.nova-enquete__opcao {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nova-enquete__acoes {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.nova-enquete__mais {
+  padding: 5px 9px;
+  font-size: 12px;
+  color: var(--lavender);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.13s, border-color 0.13s;
+}
+
+.nova-enquete__mais:hover {
+  color: var(--alabaster);
+  border-color: var(--dusk);
+}
+
+.nova-enquete__multi {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--lavender);
+  cursor: pointer;
+}
+
+.nova-enquete__multi input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Empurra o botão de criar pra direita, longe do de cancelar do topo. */
+.nova-enquete__criar {
+  margin-left: auto;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: opacity 0.13s;
+}
+
+.nova-enquete__criar:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* ── Imagem ampliada ─────────────────────────────────────────────────── */

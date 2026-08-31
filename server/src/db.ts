@@ -57,6 +57,42 @@ db.exec(`
   -- A faxina varre em ordem de idade, e os órfãos são procurados por
   -- message_id IS NULL: os dois passam por aqui.
   CREATE INDEX IF NOT EXISTS idx_attachments_created ON attachments(created_at);
+
+  -- Enquete: uma mensagem com um lado, o mesmo desenho do anexo.
+  --
+  -- Diferente dele num ponto: message_id nasce PREENCHIDO e NOT NULL. O
+  -- anexo sobe antes da mensagem porque é ele que demora e é ele que pode
+  -- falhar; uma enquete são três strings, então nasce junto, na mesma
+  -- transação. Não há órfão esperando faxina.
+  --
+  -- A coluna options é JSON num TEXT, e não uma tabela poll_options. As
+  -- opções são imutáveis depois de criadas e sempre lidas inteiras —
+  -- normalizar traria um JOIN por enquete pra sustentar um UPDATE que
+  -- nunca acontece.
+  CREATE TABLE IF NOT EXISTS polls (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL REFERENCES messages(id),
+    question   TEXT NOT NULL,
+    options    TEXT NOT NULL,
+    multi      INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_polls_message ON polls(message_id);
+
+  -- A CHAVE PRIMÁRIA COMPOSTA é quem impede votar duas vezes na mesma
+  -- opção — não há uma linha de lógica no Node pra isso, e é de propósito:
+  -- uma regra que o banco garante não tem como ser esquecida num caminho
+  -- de código novo.
+  CREATE TABLE IF NOT EXISTS poll_votes (
+    poll_id      INTEGER NOT NULL REFERENCES polls(id),
+    user_id      TEXT    NOT NULL REFERENCES users(id),
+    option_index INTEGER NOT NULL,
+    created_at   INTEGER NOT NULL,
+    PRIMARY KEY (poll_id, user_id, option_index)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(poll_id);
 `);
 
 /**
@@ -135,12 +171,13 @@ export interface ImageRow {
 /**
  * Como o chat desenha o anexo. Decidido no upload, a partir do mime.
  *
- * 'image' aparece na conversa e amplia no clique, 'audio' ganha um player,
- * 'file' vira um cartão pra baixar. Guardado em vez de deduzido na hora de
- * desenhar porque a regra pode mudar, e o que já foi mandado deve continuar
- * aparecendo do jeito que apareceu quando foi mandado.
+ * 'image' aparece na conversa e amplia no clique, 'audio' e 'video' ganham
+ * player, 'file' vira um cartão pra baixar. Guardado em vez de deduzido na
+ * hora de desenhar porque a regra pode mudar, e o que já foi mandado deve
+ * continuar aparecendo do jeito que apareceu quando foi mandado — é por isso
+ * que vídeo enviado antes desta versão segue sendo cartão de download.
  */
-export type AttachmentKind = 'image' | 'audio' | 'file';
+export type AttachmentKind = 'image' | 'audio' | 'video' | 'file';
 
 /** O que o cliente precisa saber de um anexo pra desenhá-lo. */
 export interface Attachment {
@@ -151,6 +188,26 @@ export interface Attachment {
   kind: AttachmentKind;
 }
 
+/**
+ * Uma opção da enquete, já com a apuração feita.
+ *
+ * `voters` traz os ids em vez de só a contagem porque quem votou APARECE.
+ * São seis pessoas: esconder quem votou aqui seria atrito, não privacidade
+ * — e o número sozinho não deixaria ninguém cobrar o voto de quem faltou.
+ */
+export interface PollOption {
+  text: string;
+  voters: string[];
+}
+
+export interface Poll {
+  id: number;
+  question: string;
+  /** Verdadeiro quando dá pra marcar mais de uma opção. */
+  multi: boolean;
+  options: PollOption[];
+}
+
 export interface MessageRow {
   id: number;
   body: string;
@@ -159,6 +216,29 @@ export interface MessageRow {
   author_name: string;
   author_avatar: string | null;
   attachments: Attachment[];
+  poll: Poll | null;
+}
+
+/** A enquete como ela chega pra ser criada, antes de existir no banco. */
+export interface NovaPoll {
+  question: string;
+  options: string[];
+  multi: boolean;
+}
+
+interface PollRow {
+  id: number;
+  message_id: number;
+  question: string;
+  options: string;
+  multi: number;
+  created_at: number;
+}
+
+interface VoteRow {
+  poll_id: number;
+  user_id: string;
+  option_index: number;
 }
 
 const stmts = {
@@ -242,7 +322,93 @@ const stmts = {
     'SELECT * FROM attachments WHERE message_id IS NULL AND created_at < ?',
   ),
   deleteAttachment: db.prepare<[string]>('DELETE FROM attachments WHERE id = ?'),
+
+  // --- Enquetes ----------------------------------------------------------
+  insertPoll: db.prepare(`
+    INSERT INTO polls (message_id, question, options, multi, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `),
+  findPollRow: db.prepare<[number]>('SELECT * FROM polls WHERE id = ?'),
+  pollByMessage: db.prepare<[number]>('SELECT * FROM polls WHERE message_id = ?'),
+  // Mesma ideia do attachmentsForRecent: as enquetes das mesmas mensagens
+  // que o recentMessages devolve, numa consulta só. Sem isto, abrir o chat
+  // com cem mensagens viraria cem consultas de apuração.
+  pollsForRecent: db.prepare<[number]>(`
+    SELECT * FROM polls
+     WHERE message_id IN (SELECT id FROM messages ORDER BY id DESC LIMIT ?)
+  `),
+  votesForRecent: db.prepare<[number]>(`
+    SELECT poll_id, user_id, option_index FROM poll_votes
+     WHERE poll_id IN (
+       SELECT id FROM polls
+        WHERE message_id IN (SELECT id FROM messages ORDER BY id DESC LIMIT ?)
+     )
+  `),
+  votesForPoll: db.prepare<[number]>(
+    'SELECT poll_id, user_id, option_index FROM poll_votes WHERE poll_id = ?',
+  ),
+  clearVote: db.prepare<[number, string]>(
+    'DELETE FROM poll_votes WHERE poll_id = ? AND user_id = ?',
+  ),
+  insertVote: db.prepare(
+    'INSERT INTO poll_votes (poll_id, user_id, option_index, created_at) VALUES (?, ?, ?, ?)',
+  ),
 };
+
+/**
+ * Junta a linha da enquete com os votos dela.
+ *
+ * Os votos chegam de fora em vez de serem buscados aqui porque quem chama
+ * em lote (o recentMessages) já os tem todos na mão — buscar por enquete
+ * desfaria exatamente a consulta em lote que existe pra evitar isso.
+ */
+function montarPoll(row: PollRow, votos: VoteRow[]): Poll {
+  const textos = JSON.parse(row.options) as string[];
+  const options: PollOption[] = textos.map((text) => ({ text, voters: [] }));
+  for (const v of votos) {
+    // Índice fora da lista não deveria existir (as opções são imutáveis),
+    // mas ler undefined aqui derrubaria a montagem do chat INTEIRO por
+    // causa de uma linha estranha. O `?.` custa nada e contém o estrago.
+    options[v.option_index]?.voters.push(v.user_id);
+  }
+  return {
+    id: row.id,
+    question: row.question,
+    multi: row.multi === 1,
+    options,
+  };
+}
+
+export function findPoll(id: number): Poll | undefined {
+  const row = stmts.findPollRow.get(id) as PollRow | undefined;
+  if (!row) return undefined;
+  return montarPoll(row, stmts.votesForPoll.all(id) as VoteRow[]);
+}
+
+export function pollForMessage(messageId: number): Poll | undefined {
+  const row = stmts.pollByMessage.get(messageId) as PollRow | undefined;
+  if (!row) return undefined;
+  return montarPoll(row, stmts.votesForPoll.all(row.id) as VoteRow[]);
+}
+
+/**
+ * Troca o voto da pessoa nesta enquete pelo conjunto que chegou.
+ *
+ * Apaga tudo e reinsere em vez de calcular a diferença: o conjunto que
+ * chega É a resposta, e um DELETE mais N INSERTs é mais curto e mais fácil
+ * de conferir que a diferença entre dois conjuntos. Lista vazia é voto
+ * válido — é como se desmarca.
+ *
+ * Na transação porque trocar de opção passa por um instante sem voto
+ * nenhum, e uma apuração lida nesse instante mostraria um voto a menos.
+ */
+export const setVote = db.transaction(
+  (pollId: number, userId: string, indices: number[]): void => {
+    stmts.clearVote.run(pollId, userId);
+    const agora = Date.now();
+    for (const i of indices) stmts.insertVote.run(pollId, userId, i, agora);
+  },
+);
 
 export function findUserByEmail(email: string): User | undefined {
   return stmts.findByEmail.get(email) as User | undefined;
@@ -361,12 +527,30 @@ export function orphanAttachments(before: number): AttachmentRecord[] {
  * desfaz o INSERT junto.
  */
 const inserirMensagem = db.transaction(
-  (userId: string, body: string, attachmentId: string | null): number => {
-    const info = stmts.insertMessage.run(userId, body, Date.now());
+  (
+    userId: string,
+    body: string,
+    attachmentId: string | null,
+    poll: NovaPoll | null,
+  ): number => {
+    const agora = Date.now();
+    const info = stmts.insertMessage.run(userId, body, agora);
     const id = Number(info.lastInsertRowid);
     if (attachmentId) {
       const r = stmts.attachToMessage.run(id, attachmentId, userId);
       if (r.changes === 0) throw new Error('anexo inválido');
+    }
+    // A enquete entra na MESMA transação, e é a razão de ela não precisar
+    // de faxina: ou a mensagem e a enquete existem juntas, ou nenhuma das
+    // duas existe. Uma enquete sem mensagem seria invisível pra sempre.
+    if (poll) {
+      stmts.insertPoll.run(
+        id,
+        poll.question,
+        JSON.stringify(poll.options),
+        poll.multi ? 1 : 0,
+        agora,
+      );
     }
     return id;
   },
@@ -376,8 +560,9 @@ export function saveMessage(
   userId: string,
   body: string,
   attachmentId: string | null = null,
+  poll: NovaPoll | null = null,
 ): number {
-  return inserirMensagem(userId, body, attachmentId);
+  return inserirMensagem(userId, body, attachmentId, poll);
 }
 
 export function recentMessages(limit = 100): MessageRow[] {
@@ -395,7 +580,28 @@ export function recentMessages(limit = 100): MessageRow[] {
     else porMensagem.set(a.message_id, [item]);
   }
 
-  for (const m of linhas) m.attachments = porMensagem.get(m.id) ?? [];
+  // As enquetes seguem o mesmo caminho, por duas consultas em lote: as
+  // linhas e os votos de todas elas. A segunda só sai se houver alguma —
+  // no uso normal a maioria das aberturas do chat não tem enquete nenhuma
+  // nas últimas cem mensagens, e essa consulta seria puro desperdício.
+  const porMensagemPoll = new Map<number, Poll>();
+  const linhasPoll = stmts.pollsForRecent.all(limit) as PollRow[];
+  if (linhasPoll.length > 0) {
+    const votosPorPoll = new Map<number, VoteRow[]>();
+    for (const v of stmts.votesForRecent.all(limit) as VoteRow[]) {
+      const lista = votosPorPoll.get(v.poll_id);
+      if (lista) lista.push(v);
+      else votosPorPoll.set(v.poll_id, [v]);
+    }
+    for (const row of linhasPoll) {
+      porMensagemPoll.set(row.message_id, montarPoll(row, votosPorPoll.get(row.id) ?? []));
+    }
+  }
+
+  for (const m of linhas) {
+    m.attachments = porMensagem.get(m.id) ?? [];
+    m.poll = porMensagemPoll.get(m.id) ?? null;
+  }
   return linhas;
 }
 

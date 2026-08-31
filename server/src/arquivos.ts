@@ -43,6 +43,20 @@ const AUDIO_MIME = new Set([
   'audio/webm', 'audio/mp4', 'audio/aac', 'audio/flac',
 ]);
 
+/**
+ * Vídeo que o Chromium toca de verdade.
+ *
+ * A lista é curta de propósito, e .mkv (video/x-matroska) fica DE FORA: o
+ * Chromium abre o container mas quase nunca toca o codec que vem dentro, e
+ * o resultado seria um retângulo preto no lugar de um botão de baixar que
+ * funciona. Classificar como vídeo o que não toca é pior que não
+ * classificar — cair em 'file' pelo menos entrega o arquivo.
+ *
+ * O caminho já estava pronto pro player: o GET responde Range desde os
+ * áudios, que é exatamente o que permite pular pro meio do vídeo.
+ */
+const VIDEO_MIME = new Set(['video/mp4', 'video/webm', 'video/ogg']);
+
 /** Onde os bytes de um anexo moram. O id é o nome: nada vindo do usuário. */
 const caminho = (id: string) => join(config.filesDir, id);
 
@@ -70,7 +84,7 @@ export function paraCliente(a: {
  * Decide como o anexo vai ser tratado, a partir do mime que o cliente
  * declarou.
  *
- * O que NÃO estiver nas duas listas vira 'file' e perde o mime declarado:
+ * O que NÃO estiver nas três listas vira 'file' e perde o mime declarado:
  * passa a ser servido como octet-stream, pra download. É de propósito —
  * servir bytes de usuário com o content-type que o próprio usuário escolheu
  * é o caminho curto pra alguém mandar um "audio/mpeg" que na verdade é
@@ -80,6 +94,7 @@ function classificar(mimeDeclarado: string): { kind: AttachmentKind; mime: strin
   const m = mimeDeclarado.toLowerCase().split(';')[0].trim();
   if (IMAGE_MIME.has(m)) return { kind: 'image', mime: m };
   if (AUDIO_MIME.has(m)) return { kind: 'audio', mime: m };
+  if (VIDEO_MIME.has(m)) return { kind: 'video', mime: m };
   return { kind: 'file', mime: 'application/octet-stream' };
 }
 

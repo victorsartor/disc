@@ -43,7 +43,40 @@ export function Anexo({ anexo, chatVolume, onAmpliar }: Props) {
 
   if (anexo.kind === 'audio') return <AnexoAudio anexo={anexo} volume={chatVolume} />;
 
+  if (anexo.kind === 'video') return <AnexoVideo anexo={anexo} volume={chatVolume} />;
+
   return <AnexoArquivo anexo={anexo} />;
+}
+
+function AnexoVideo({ anexo, volume }: { anexo: Attachment; volume: number }) {
+  const ref = useRef<HTMLVideoElement>(null);
+
+  // Mesma razão do áudio: `volume` é propriedade do elemento, não atributo
+  // do HTML. Escrever volume={x} no JSX não faria nada.
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.volume = Math.min(1, Math.max(0, volume / 100));
+  }, [volume]);
+
+  return (
+    <div className="anexo anexo--video">
+      {/* preload="metadata" traz só o cabeçalho — duração, tamanho e o
+          primeiro quadro — em vez de baixar o vídeo inteiro de toda
+          mensagem a cada abertura do chat. Pular pro meio funciona porque o
+          servidor responde Range desde os áudios.
+
+          playsInline pro vídeo tocar no lugar dele, e não tomar a tela. */}
+      <video
+        ref={ref}
+        className="anexo__video"
+        src={anexo.url}
+        controls
+        preload="metadata"
+        playsInline
+      />
+      <span className="anexo__nome" title={anexo.name}>{anexo.name}</span>
+    </div>
+  );
 }
 
 function AnexoAudio({ anexo, volume }: { anexo: Attachment; volume: number }) {

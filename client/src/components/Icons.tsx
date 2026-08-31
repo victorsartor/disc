@@ -169,6 +169,23 @@ export const IconClipe = ({ size = 16 }: Props) => (
   </svg>
 );
 
+/** Seta pra baixo: voltar pro fim da conversa. */
+export const IconDescer = ({ size = 16 }: Props) => (
+  <svg {...base(size)}>
+    <path d="M12 5v14" />
+    <path d="m19 12-7 7-7-7" />
+  </svg>
+);
+
+/** Três barras de alturas diferentes: a enquete apurada. */
+export const IconEnquete = ({ size = 16 }: Props) => (
+  <svg {...base(size)}>
+    <path d="M4 20V10" />
+    <path d="M12 20V4" />
+    <path d="M20 20v-6" />
+  </svg>
+);
+
 /** Folha de papel: o cartão de arquivo pra baixar. */
 export const IconArquivo = ({ size = 16 }: Props) => (
   <svg {...base(size)}>

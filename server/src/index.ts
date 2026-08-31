@@ -1,10 +1,14 @@
 import Fastify from 'fastify';
 import { AccessToken } from 'livekit-server-sdk';
-import { config, CHANNELS, isValidChannel, MAX_MESSAGE_LENGTH } from './config.js';
+import {
+  config, CHANNELS, isValidChannel, MAX_MESSAGE_LENGTH,
+  MAX_POLL_QUESTION, MAX_POLL_OPTION, MIN_POLL_OPTIONS, MAX_POLL_OPTIONS,
+} from './config.js';
 import { registerAuthRoutes, userFromRequest } from './auth.js';
 import {
   recentMessages, saveMessage, touchPresence, setStatus, findUserById,
-  findAttachment, type User,
+  findAttachment, findPoll, pollForMessage, setVote,
+  type User, type NovaPoll,
 } from './db.js';
 import { rateLimit } from './ratelimit.js';
 import { presence, usersPresence, statusEfetivo } from './presence.js';
@@ -159,6 +163,43 @@ app.patch('/api/me/status', async (req, reply) => {
   return { status };
 });
 
+/**
+ * Valida a enquete que chegou no corpo da mensagem.
+ *
+ * Devolve a enquete pronta ou o motivo da recusa — nunca as duas coisas.
+ * Está numa função à parte porque a rota de mensagem já é comprida e
+ * porque validar enquete é o tipo de coisa que se lê melhor de uma vez.
+ */
+function lerPoll(bruto: unknown): { poll: NovaPoll } | { erro: string } {
+  if (bruto === null || typeof bruto !== 'object') return { erro: 'enquete inválida' };
+
+  const { question, options, multi } = bruto as {
+    question?: unknown; options?: unknown; multi?: unknown;
+  };
+
+  if (typeof question !== 'string') return { erro: 'pergunta inválida' };
+  const pergunta = question.trim();
+  if (!pergunta) return { erro: 'pergunta vazia' };
+  if (pergunta.length > MAX_POLL_QUESTION) return { erro: 'pergunta muito longa' };
+
+  if (!Array.isArray(options)) return { erro: 'opções inválidas' };
+  const opcoes: string[] = [];
+  for (const o of options) {
+    if (typeof o !== 'string') return { erro: 'opções inválidas' };
+    const texto = o.trim();
+    // Opção em branco é descartada em vez de recusada: o formulário nasce
+    // com campos vazios de sobra, e quem preencheu só duas não errou nada.
+    if (!texto) continue;
+    if (texto.length > MAX_POLL_OPTION) return { erro: 'opção muito longa' };
+    opcoes.push(texto);
+  }
+
+  if (opcoes.length < MIN_POLL_OPTIONS) return { erro: 'a enquete precisa de 2 opções' };
+  if (opcoes.length > MAX_POLL_OPTIONS) return { erro: 'a enquete aceita até 6 opções' };
+
+  return { poll: { question: pergunta, options: opcoes, multi: multi === true } };
+}
+
 app.get('/api/messages', async (req, reply) => {
   const user = await requireUser(req, reply);
   if (!user) return;
@@ -178,9 +219,10 @@ app.post('/api/messages', async (req, reply) => {
     return reply.code(429).send({ error: 'devagar aí' });
   }
 
-  const { body, attachmentId } = (req.body ?? {}) as {
+  const { body, attachmentId, poll } = (req.body ?? {}) as {
     body?: unknown;
     attachmentId?: unknown;
+    poll?: unknown;
   };
   if (typeof body !== 'string') {
     return reply.code(400).send({ error: 'corpo inválido' });
@@ -189,10 +231,19 @@ app.post('/api/messages', async (req, reply) => {
     return reply.code(400).send({ error: 'anexo inválido' });
   }
 
+  let novaPoll: NovaPoll | null = null;
+  if (poll !== undefined) {
+    const r = lerPoll(poll);
+    if ('erro' in r) return reply.code(400).send({ error: r.erro });
+    novaPoll = r.poll;
+  }
+
   const text = body.trim();
-  // Sem texto só se vier anexo: mandar uma foto sem legenda é normal,
-  // mandar um balão vazio não.
-  if (!text && !attachmentId) return reply.code(400).send({ error: 'mensagem vazia' });
+  // Sem texto só se vier anexo ou enquete: mandar uma foto sem legenda é
+  // normal, mandar um balão vazio não. A pergunta da enquete já é o texto.
+  if (!text && !attachmentId && !novaPoll) {
+    return reply.code(400).send({ error: 'mensagem vazia' });
+  }
   if (text.length > MAX_MESSAGE_LENGTH) {
     return reply.code(400).send({ error: 'mensagem muito longa' });
   }
@@ -203,7 +254,7 @@ app.post('/api/messages', async (req, reply) => {
   try {
     // Guardamos o texto cru. A sanitização acontece na renderização,
     // que é o único lugar onde XSS pode virar execução.
-    id = saveMessage(user.id, text, attachmentId ?? null);
+    id = saveMessage(user.id, text, attachmentId ?? null, novaPoll);
   } catch {
     return reply.code(400).send({ error: 'anexo inválido' });
   }
@@ -222,8 +273,70 @@ app.post('/api/messages', async (req, reply) => {
       // body — que numa foto sem legenda é vazio. Balão em branco até a
       // pessoa atualizar; o electron-updater fecha essa janela sozinho.
       attachments: anexo ? [paraCliente(anexo)] : [],
+      // Relido do banco em vez de devolvido do que chegou: é o insert que
+      // decide o id da enquete, e sem ele o app de quem mandou não teria
+      // como votar na própria enquete até o polling trazer a mensagem.
+      poll: novaPoll ? pollForMessage(id) ?? null : null,
     },
   };
+});
+
+/**
+ * A apuração de UMA enquete.
+ *
+ * Existe pro aviso de voto que chega pelo data channel: quem recebe
+ * pergunta ao SERVIDOR quanto ficou, em vez de somar um no número que já
+ * tinha. Um voto perdido no caminho deixaria dois apps com contas
+ * diferentes e nada que as reconciliasse.
+ */
+app.get('/api/polls/:id', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return;
+
+  const { id } = req.params as { id: string };
+  const poll = findPoll(Number(id));
+  if (!poll) return reply.code(404).send({ error: 'enquete inexistente' });
+  return { poll };
+});
+
+/**
+ * O voto. PUT porque o corpo é o conjunto INTEIRO de opções marcadas, e
+ * não um incremento: mandar duas vezes o mesmo voto dá o mesmo resultado.
+ */
+app.put('/api/polls/:id/vote', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return;
+
+  if (!rateLimit(`vote:${user.id}`, 30, 10_000)) {
+    return reply.code(429).send({ error: 'devagar aí' });
+  }
+
+  const { id } = req.params as { id: string };
+  const pollId = Number(id);
+  const poll = findPoll(pollId);
+  if (!poll) return reply.code(404).send({ error: 'enquete inexistente' });
+
+  const { options } = (req.body ?? {}) as { options?: unknown };
+  if (!Array.isArray(options)) {
+    return reply.code(400).send({ error: 'voto inválido' });
+  }
+
+  // Set: marcar a mesma opção duas vezes na mesma requisição violaria a
+  // chave primária e derrubaria a transação inteira. Aqui vira uma só.
+  const indices = new Set<number>();
+  for (const o of options) {
+    if (!Number.isInteger(o) || (o as number) < 0 || (o as number) >= poll.options.length) {
+      return reply.code(400).send({ error: 'opção inexistente' });
+    }
+    indices.add(o as number);
+  }
+
+  if (!poll.multi && indices.size > 1) {
+    return reply.code(400).send({ error: 'essa enquete aceita um voto só' });
+  }
+
+  setVote(pollId, user.id, [...indices]);
+  return { poll: findPoll(pollId)! };
 });
 
 const start = async () => {
