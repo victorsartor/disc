@@ -31,6 +31,39 @@ function Medidor({ nivel, corte }: { nivel: number | null; corte: number }) {
   );
 }
 
+/**
+ * Barrinha de volume de 0 a 100, com o número do lado.
+ *
+ * O número não é enfeite: sem ele não dá pra saber se você está em 40 ou em
+ * 55, e "deixei no mesmo de ontem" vira impossível.
+ */
+function VolumeRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="settings__row settings__row--volume">
+      <span className="settings__label">{label}</span>
+      <input
+        type="range"
+        className="volume__slider"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      <span className="volume__value">{value}</span>
+    </div>
+  );
+}
+
 /** Depois desse tempo sem tecla nenhuma, a captura desiste sozinha. */
 const CAPTURE_TIMEOUT = 15000;
 
@@ -294,6 +327,42 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
               O ganho automático nivela sua voz — e, nas pausas, amplifica o
               silêncio junto. Se o microfone parecer pegar tudo mesmo com o
               portão ajustado, desligue este primeiro.
+            </p>
+          </section>
+
+          <section className="settings__group">
+            <h3 className="settings__title">Sons</h3>
+
+            <VolumeRow
+              label="Voz das pessoas"
+              value={settings.voiceVolume}
+              onChange={(v) => void onPatch({ voiceVolume: v })}
+            />
+            <p className="settings__hint">
+              Vale pra call inteira. O volume de cada pessoa, no botão direito
+              sobre o nome dela, continua valendo por cima deste.
+            </p>
+
+            <VolumeRow
+              label="Efeitos"
+              value={settings.effectsVolume}
+              onChange={(v) => void onPatch({ effectsVolume: v })}
+            />
+            <p className="settings__hint">
+              {settings.effectsVolume === 0
+                ? 'Sem som ao entrar, sair, compartilhar tela ou chegar mensagem.'
+                : 'Entrar e sair da call, começar e parar de compartilhar tela, '
+                  + 'e o aviso de mensagem nova.'}
+            </p>
+
+            <VolumeRow
+              label="Áudio do chat"
+              value={settings.chatVolume}
+              onChange={(v) => void onPatch({ chatVolume: v })}
+            />
+            <p className="settings__hint">
+              Os áudios que as pessoas mandam no chat. Não mexe na voz de
+              ninguém na call.
             </p>
           </section>
 

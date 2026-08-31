@@ -1,10 +1,15 @@
 import {
   app, BrowserWindow, ipcMain, shell, safeStorage,
-  desktopCapturer, globalShortcut, clipboard, Menu, session,
+  desktopCapturer, globalShortcut, clipboard, Menu, session, dialog,
 } from 'electron';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import {
+  readFileSync, writeFileSync, rmSync, existsSync,
+  createReadStream, createWriteStream, statSync,
+} from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import {
   getSettings, patchSettings, setVolume, setScreenVolume, sanitizePatch,
 } from './settings.js';
@@ -323,8 +328,16 @@ ipcMain.handle('api:heartbeat', (_e, ativo: unknown) =>
   }));
 ipcMain.handle('api:set-status', (_e, status: unknown) =>
   apiFetch('/api/me/status', { method: 'PATCH', body: JSON.stringify({ status }) }));
-ipcMain.handle('api:send-message', (_e, body: string) =>
-  apiFetch('/api/messages', { method: 'POST', body: JSON.stringify({ body }) }));
+ipcMain.handle('api:send-message', (_e, body: string, attachmentId?: unknown) =>
+  apiFetch('/api/messages', {
+    method: 'POST',
+    body: JSON.stringify({
+      body,
+      // undefined some do JSON; mandar null faria o servidor recusar por
+      // tipo, ja que la a checagem e `!== undefined`.
+      attachmentId: typeof attachmentId === 'string' ? attachmentId : undefined,
+    }),
+  }));
 ipcMain.handle('api:room-token', (_e, channelId: string) =>
   apiFetch(`/api/rooms/${encodeURIComponent(channelId)}/token`, { method: 'POST' }));
 ipcMain.handle('api:whip-config', (_e, channelId: string) =>
@@ -482,4 +495,122 @@ ipcMain.handle('api:profile-image', (_e, kind: unknown, dataUrl: unknown) => {
     method: 'POST',
     body: JSON.stringify({ dataUrl: corpo }),
   });
+});
+
+// --- IPC: anexos do chat -------------------------------------------------
+/** Igual ao do servidor. Aqui evita subir 200 MB pra receber 413 no fim. */
+const MAX_FILE_BYTES = 200 * 1024 * 1024;
+
+/**
+ * Mime pela extensao.
+ *
+ * So precisa acertar imagem e audio: e isso que o servidor usa pra decidir
+ * o que o chat desenha na conversa. Todo o resto ele trata como
+ * octet-stream de qualquer jeito, entao um .docx que nao esteja aqui nao
+ * muda nada - vira cartao de download, que e o que ele seria mesmo.
+ */
+const MIME_POR_EXT: Record<string, string> = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+  '.webp': 'image/webp', '.gif': 'image/gif',
+  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac', '.flac': 'audio/flac', '.weba': 'audio/webm',
+};
+
+const mimeDoNome = (nome: string) =>
+  MIME_POR_EXT[extname(nome).toLowerCase()] ?? 'application/octet-stream';
+
+/**
+ * Manda bytes pro /api/arquivos.
+ *
+ * `corpo` pode ser um Buffer (imagem ja reduzida) ou um ReadableStream (o
+ * arquivo do disco). O stream e o que segura os 200 MB: com `duplex: half`
+ * o undici vai enviando conforme le, sem juntar o arquivo na memoria. O
+ * cast existe porque o RequestInit do TypeScript ainda nao tem o campo.
+ */
+async function subirArquivo(
+  corpo: Buffer | ReadableStream,
+  nome: string,
+  mime: string,
+): Promise<unknown> {
+  if (!sessionToken) throw new Error('sem sessao');
+
+  const query = `nome=${encodeURIComponent(nome)}&mime=${encodeURIComponent(mime)}`;
+  const res = await fetch(`${SERVER_URL}/api/arquivos?${query}`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${sessionToken}`,
+      'content-type': 'application/octet-stream',
+    },
+    body: corpo,
+    duplex: 'half',
+  } as RequestInit);
+
+  if (res.status === 401) {
+    saveSession(null);
+    win?.webContents.send('auth:changed', false);
+    throw new Error('sessao expirada');
+  }
+  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+  return res.json();
+}
+
+ipcMain.handle('api:upload-file', async (_e, caminho: unknown) => {
+  if (typeof caminho !== 'string' || !caminho) throw new Error('caminho invalido');
+
+  // Barra antes de subir: o servidor tambem barra, mas descobrir depois de
+  // empurrar 200 MB pela rede e desperdicio dos dois lados.
+  const tamanho = statSync(caminho).size;
+  if (tamanho > MAX_FILE_BYTES) throw new Error('arquivo maior que 200 MB');
+  if (tamanho === 0) throw new Error('arquivo vazio');
+
+  const nome = basename(caminho);
+  return subirArquivo(
+    Readable.toWeb(createReadStream(caminho)) as ReadableStream,
+    nome,
+    mimeDoNome(nome),
+  );
+});
+
+ipcMain.handle('api:upload-image', (_e, bytes: unknown, nome: unknown, mime: unknown) => {
+  if (!(bytes instanceof Uint8Array)) throw new Error('imagem invalida');
+  return subirArquivo(
+    Buffer.from(bytes),
+    typeof nome === 'string' ? nome : 'imagem.jpg',
+    typeof mime === 'string' ? mime : 'image/jpeg',
+  );
+});
+
+/**
+ * Baixa pro disco, com a janela de salvar do sistema.
+ *
+ * Passa por aqui porque o renderer nao escreve arquivo - e tambem porque
+ * assim o download e um stream do servidor direto pro destino escolhido,
+ * sem o arquivo inteiro passar pela memoria de ninguem.
+ */
+ipcMain.handle('api:download-file', async (_e, id: unknown, nome: unknown) => {
+  if (typeof id !== 'string') throw new Error('id invalido');
+
+  const janela = win;
+  if (!janela) return { salvo: false };
+
+  const { canceled, filePath } = await dialog.showSaveDialog(janela, {
+    defaultPath: typeof nome === 'string' ? nome : 'arquivo',
+  });
+  if (canceled || !filePath) return { salvo: false };
+
+  // Sem authorization de proposito: a rota nao pede sessao, pelo mesmo
+  // motivo do /api/img - e a mesma URL que a <img> e o <audio> usam.
+  const res = await fetch(`${SERVER_URL}/api/arquivos/${encodeURIComponent(id)}`);
+  if (!res.ok || !res.body) throw new Error(`nao consegui baixar (HTTP ${res.status})`);
+
+  try {
+    await pipeline(Readable.fromWeb(res.body as never), createWriteStream(filePath));
+  } catch (err) {
+    // Meio arquivo no disco com o nome do inteiro engana mais que a falha.
+    rmSync(filePath, { force: true });
+    throw err;
+  }
+
+  return { salvo: true };
 });

@@ -26,6 +26,16 @@ export interface Settings {
   volumes: Record<string, number>;
   /** identity -> volume do SOM DA TELA daquela pessoa (0 a 1) */
   screenVolumes: Record<string, number>;
+  /**
+   * Volume geral da voz, de 0 a 100. MULTIPLICA o slider de cada pessoa em
+   * vez de substitui-lo: quem ja tinha alguem baixado continua com ele
+   * baixado em relacao aos outros.
+   */
+  voiceVolume: number;
+  /** Volume dos sons de evento (entrar, sair, tela, notificacao), 0 a 100. */
+  effectsVolume: number;
+  /** Volume dos audios que as pessoas mandam no chat, 0 a 100. */
+  chatVolume: number;
   /** Monitor do PipeWire de onde tirar o som da tela no Linux. */
   screenAudioDeviceId: string | null;
   overlayEnabled: boolean;
@@ -49,6 +59,9 @@ const DEFAULTS: Settings = {
   autoGainControl: true,
   volumes: {},
   screenVolumes: {},
+  voiceVolume: 100,
+  effectsVolume: 100,
+  chatVolume: 100,
   screenAudioDeviceId: null,
   overlayEnabled: true,
   overlayX: null,
@@ -59,6 +72,13 @@ const DEFAULTS: Settings = {
 let cache: Settings | null = null;
 
 const file = () => join(app.getPath('userData'), 'settings.json');
+
+/** Um 0 a 100 valido, ou o padrao. Usado na leitura e no patch. */
+function percentual(v: unknown, padrao: number): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return padrao;
+  return Math.min(100, Math.max(0, Math.round(n)));
+}
 
 export function getSettings(): Settings {
   if (cache) return cache;
@@ -77,6 +97,12 @@ export function getSettings(): Settings {
       // como undefined em vez do objeto vazio do DEFAULTS.
       volumes: { ...(raw.volumes ?? {}) },
       screenVolumes: { ...(raw.screenVolumes ?? {}) },
+      // Pelo mesmo motivo dos mapas acima: o spread copia o que estiver no
+      // arquivo, e um null gravado por uma versao futura ou pela mao de
+      // alguem passaria por cima do default e viraria ganho invalido.
+      voiceVolume: percentual(raw.voiceVolume, DEFAULTS.voiceVolume),
+      effectsVolume: percentual(raw.effectsVolume, DEFAULTS.effectsVolume),
+      chatVolume: percentual(raw.chatVolume, DEFAULTS.chatVolume),
     };
   } catch {
     next = { ...DEFAULTS };
@@ -95,15 +121,36 @@ const ALLOWED_KEYS = new Set<keyof Settings>([
   'voiceMode', 'pttKeycode', 'pttKeyLabel', 'micDeviceId',
   'speakerDeviceId', 'micSensitivity', 'noiseSuppression',
   'echoCancellation', 'autoGainControl', 'volumes', 'screenVolumes',
+  'voiceVolume', 'effectsVolume', 'chatVolume',
   'screenAudioDeviceId',
   'overlayEnabled', 'overlayX', 'overlayY', 'theme',
+]);
+
+/**
+ * Chaves cujo valor tambem e checado, e nao so o nome.
+ *
+ * Estas viram ganho de Web Audio do outro lado, e ali um NaN nao e um som
+ * errado: e uma excecao que derruba o no de audio. Um valor negativo
+ * inverte a fase em vez de abaixar. Como e o unico lugar por onde elas
+ * entram, o conserto fica aqui.
+ */
+const PERCENT_KEYS = new Set<keyof Settings>([
+  'voiceVolume', 'effectsVolume', 'chatVolume',
 ]);
 
 export function sanitizePatch(input: unknown): Partial<Settings> {
   if (typeof input !== 'object' || input === null) return {};
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(input)) {
-    if (ALLOWED_KEYS.has(k as keyof Settings)) out[k] = v;
+    if (!ALLOWED_KEYS.has(k as keyof Settings)) continue;
+    // Lixo aqui e descartado em vez de virar o padrao: o patch e parcial, e
+    // deixar de fora preserva o que ja estava salvo.
+    if (PERCENT_KEYS.has(k as keyof Settings)) {
+      if (!Number.isFinite(Number(v))) continue;
+      out[k] = percentual(v, 100);
+      continue;
+    }
+    out[k] = v;
   }
   return out as Partial<Settings>;
 }

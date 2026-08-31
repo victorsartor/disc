@@ -163,8 +163,8 @@ export function App() {
     };
   }, [loggedIn, addMessage]);
 
-  const sendChat = useCallback(async (body: string) => {
-    const { message } = await window.disc.sendMessage(body);
+  const sendChat = useCallback(async (body: string, attachmentId?: string) => {
+    const { message } = await window.disc.sendMessage(body, attachmentId);
     addMessage(message);
     await room.broadcastChat(message);
   }, [addMessage, room]);
@@ -282,7 +282,12 @@ export function App() {
           onParar={room.toggleAssistir}
           localScreen={room.localScreen}
         />
-        <Chat messages={messages} onSend={sendChat} onOpenUser={openUser} />
+        <Chat
+          messages={messages}
+          onSend={sendChat}
+          onOpenUser={openUser}
+          chatVolume={room.settings?.chatVolume ?? 100}
+        />
       </div>
 
       {picking && (

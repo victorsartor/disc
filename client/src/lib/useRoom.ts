@@ -14,6 +14,7 @@ import {
 import type { Message, Settings } from '../types';
 import {
   playJoin, playLeave, playConnect, playDisconnect, playShareStart, playShareStop,
+  setEffectsVolume,
 } from './sounds';
 import { Mic } from './mic';
 
@@ -27,6 +28,10 @@ export interface Peer {
   isDeafened: boolean;
   isSharing: boolean;
   isLocal: boolean;
+  /**
+   * O slider DESTA pessoa (0 a 2) - o que a barrinha mostra, sem o volume
+   * geral da voz por cima. O ganho aplicado de verdade esta no AudioFeed.
+   */
   volume: number;
 }
 
@@ -59,7 +64,9 @@ export interface AudioFeed {
   kind: 'voice' | 'screen';
   track: RemoteAudioTrack;
   /**
-   * Volume escolhido pra esta faixa (0 a 2), ja vindo do settings.json.
+   * Ganho FINAL desta faixa, ja pronto pra aplicar - nao o que a barrinha
+   * mostra. Em 'voice' e o slider da pessoa vezes o volume geral da voz;
+   * em 'screen' e so o slider da pessoa.
    *
    * Viaja junto com a faixa porque quem anexa o <audio> e quem precisa
    * reaplicar o ganho, e ele so descobre o valor certo por aqui. Ver o
@@ -141,8 +148,8 @@ async function somDoSistema(deviceId: string | null): Promise<MediaStreamTrack |
  * e o mesmo resultado com menos estado.
  */
 function aplicarVolumesSalvos(p: RemoteParticipant, cfg: Settings | null): void {
-  const vol = cfg?.volumes[p.identity];
-  if (vol !== undefined && vol !== 1) p.setVolume(vol, Track.Source.Microphone);
+  const vol = volumeVoz(cfg, p.identity);
+  if (vol !== 1) p.setVolume(vol, Track.Source.Microphone);
 
   const svol = cfg?.screenVolumes[p.identity];
   if (svol !== undefined && svol !== 1) {
@@ -150,19 +157,41 @@ function aplicarVolumesSalvos(p: RemoteParticipant, cfg: Settings | null): void 
   }
 }
 
+/** Multiplicador geral da voz, de 0 a 1. O slider guarda de 0 a 100. */
+function ganhoVoz(cfg: Settings | null): number {
+  return (cfg?.voiceVolume ?? 100) / 100;
+}
+
+/**
+ * Volume final da voz de alguem: o slider DA PESSOA vezes o geral.
+ *
+ * Os dois existem separados de proposito. O da pessoa e uma relacao entre
+ * participantes - "fulano fala alto demais" - e continua verdade amanha; o
+ * geral e a call inteira contra o resto do sistema. Multiplicar e o que
+ * preserva a relacao quando o geral se mexe: baixar tudo pela metade deixa
+ * quem estava baixo ainda mais baixo que os outros, e nao todo mundo igual.
+ */
+function volumeVoz(cfg: Settings | null, identity: string): number {
+  return (cfg?.volumes[identity] ?? 1) * ganhoVoz(cfg);
+}
+
 /**
  * Volume salvo pra uma pessoa, no mapa da trilha certa.
  *
  * 1 e o padrao de quem nunca foi mexido - e tambem o que sai pra quem mexeu
  * e voltou pro cheio, ja que aplicarVolumesSalvos nao guarda o 1.
+ *
+ * So a voz leva o multiplicador geral. O som da tela tem o dele por pessoa
+ * e ficou de fora: o slider se chama "voz das pessoas", e abaixar a voz de
+ * todo mundo pra ouvir melhor o jogo e justamente o caso que ele atende.
  */
 function volumeSalvo(
   cfg: Settings | null,
   identity: string,
   kind: 'voice' | 'screen',
 ): number {
-  const mapa = kind === 'screen' ? cfg?.screenVolumes : cfg?.volumes;
-  return mapa?.[identity] ?? 1;
+  if (kind === 'screen') return cfg?.screenVolumes[identity] ?? 1;
+  return volumeVoz(cfg, identity);
 }
 
 function readAvatar(p: Participant): string | null {
@@ -222,6 +251,9 @@ export function useRoom(onChatMessage: (m: Message) => void) {
       setSettings(s);
       setScreenVolumes(s.screenVolumes ?? {});
       setMicWanted(s.voiceMode === 'vad');
+      // O sounds.ts guarda o ganho em modulo: quem chama playJoin() e um
+      // handler da sala, que nao tem as configuracoes na mao.
+      setEffectsVolume(s.effectsVolume);
     });
   }, []);
 
@@ -271,6 +303,29 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     const next = await window.disc.settings.patch(patch);
     settingsRef.current = next;
     setSettings(next);
+
+    if (patch.effectsVolume !== undefined) setEffectsVolume(next.effectsVolume);
+
+    /**
+     * O volume geral da voz vale pra quem JA esta falando, nao so pra
+     * proxima faixa que chegar - senao a barrinha so faria efeito depois de
+     * a pessoa sair e voltar.
+     *
+     * Os dois caminhos precisam ser atualizados. O setVolume do participante
+     * cobre o agora; o volume guardado no feed cobre o reanexar, que e de
+     * onde o <audio> tira o ganho quando a faixa se reconstroi (o porque
+     * esta no comentario grande do RoomAudio).
+     */
+    if (patch.voiceVolume !== undefined) {
+      roomRef.current?.remoteParticipants.forEach((p) => {
+        p.setVolume(volumeVoz(next, p.identity), Track.Source.Microphone);
+      });
+      setAudios((prev) =>
+        prev.map((a) =>
+          a.kind === 'voice' ? { ...a, volume: volumeVoz(next, a.identity) } : a,
+        ),
+      );
+    }
 
     // Corte e modo de voz o portao aceita a quente, sem recapturar nada.
     const mic = micRef.current;
@@ -654,9 +709,13 @@ export function useRoom(onChatMessage: (m: Message) => void) {
    * segunda trilha logo abaixo mexendo na mesma pessoa.
    */
   const setPeerVolume = useCallback((identity: string, volume: number) => {
+    // `volume` e o slider DA PESSOA - e ele que fica salvo e que a barrinha
+    // mostra. O que sai no ar e ele vezes o geral.
+    const final = volume * ganhoVoz(settingsRef.current);
+
     roomRef.current
       ?.remoteParticipants.get(identity)
-      ?.setVolume(volume, Track.Source.Microphone);
+      ?.setVolume(final, Track.Source.Microphone);
     void window.disc.settings.setVolume(identity, volume);
     if (settingsRef.current) {
       settingsRef.current.volumes = { ...settingsRef.current.volumes, [identity]: volume };
@@ -664,7 +723,9 @@ export function useRoom(onChatMessage: (m: Message) => void) {
     setPeers((prev) => prev.map((p) => (p.identity === identity ? { ...p, volume } : p)));
     // A faixa tambem: e dela que o <audio> tira o ganho ao reanexar.
     setAudios((prev) =>
-      prev.map((a) => (a.identity === identity && a.kind === 'voice' ? { ...a, volume } : a)),
+      prev.map((a) =>
+        a.identity === identity && a.kind === 'voice' ? { ...a, volume: final } : a,
+      ),
     );
   }, []);
 

@@ -28,6 +28,31 @@ export interface UserProfile {
   statusText: string;
 }
 
+/**
+ * Como o chat desenha o anexo. Vem decidido do servidor, não do mime.
+ *
+ * 'image' aparece na conversa e amplia no clique, 'audio' ganha um player,
+ * 'file' vira cartão pra baixar. O servidor só marca image/audio pra
+ * formato que ele mesmo se dispõe a servir com o content-type de verdade —
+ * o resto cai em 'file' e desce como octet-stream.
+ */
+export type AttachmentKind = 'image' | 'audio' | 'file';
+
+export interface Attachment {
+  id: string;
+  name: string;
+  mime: string;
+  /** Bytes. É o que o cartão mostra como "2,4 MB". */
+  size: number;
+  kind: AttachmentKind;
+  /**
+   * Endereço pronto pra <img> e <audio>, montado pelo servidor — mesma
+   * escolha da foto de perfil. Sem sessão: tag não manda header de
+   * autorização, e quem protege é o id aleatório mais a tailnet.
+   */
+  url: string;
+}
+
 export interface Message {
   id: number;
   body: string;
@@ -35,6 +60,12 @@ export interface Message {
   user_id: string;
   author_name: string;
   author_avatar: string | null;
+  /**
+   * Vazio na esmagadora maioria das mensagens. Pode faltar por completo
+   * numa mensagem que chegou pelo data channel de um app antigo, daí o
+   * opcional — quem lê precisa tratar undefined.
+   */
+  attachments?: Attachment[];
 }
 
 /**
@@ -112,6 +143,15 @@ export interface Settings {
   /** identity -> volume do som da tela daquela pessoa (0 a 2). */
   screenVolumes: Record<string, number>;
   /**
+   * Volume geral da voz, 0 a 100. Multiplica o slider de cada pessoa — não
+   * substitui, então quem já tinha alguém baixado mantém a proporção.
+   */
+  voiceVolume: number;
+  /** Volume dos sons de evento (entrar, sair, tela, notificação), 0 a 100. */
+  effectsVolume: number;
+  /** Volume dos áudios que as pessoas mandam no chat, 0 a 100. */
+  chatVolume: number;
+  /**
    * Dispositivo de onde tirar o som ao compartilhar tela no Linux.
    *
    * Existe porque o Chromium nao captura som de sistema no Linux: la o jeito
@@ -163,7 +203,24 @@ export interface DiscApi {
   /** Batimento do app aberto. `ativo` renova o relógio dos 10 minutos. */
   heartbeat(ativo: boolean): Promise<{ status: StatusEfetivo }>;
   setStatus(status: StatusEscolhido): Promise<{ status: StatusEscolhido }>;
-  sendMessage(body: string): Promise<{ message: Message }>;
+  sendMessage(body: string, attachmentId?: string): Promise<{ message: Message }>;
+  arquivos: {
+    /**
+     * Sobe um arquivo do disco pelo CAMINHO, não pelos bytes.
+     *
+     * O processo main lê do disco e faz stream direto pro servidor: 200 MB
+     * atravessando o IPC seriam copiados na memória dos dois lados. O
+     * caminho sai do webUtils.getPathForFile — `File.path` foi removido no
+     * Electron 32.
+     */
+    enviar(caminho: string): Promise<{ attachment: Attachment }>;
+    /** Imagem já reduzida no renderer: pequena, então os bytes podem vir. */
+    enviarImagem(bytes: Uint8Array, nome: string, mime: string): Promise<{ attachment: Attachment }>;
+    /** Abre a janela de salvar e baixa. `false` = a pessoa cancelou. */
+    baixar(id: string, nome: string): Promise<{ salvo: boolean }>;
+    /** Caminho no disco de um File escolhido no seletor. */
+    caminhoDe(file: File): string;
+  };
   roomToken(channelId: string): Promise<RoomTokenResponse>;
   whipConfig(channelId: string): Promise<WhipConfig>;
   profile: {

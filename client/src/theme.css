@@ -635,6 +635,36 @@ textarea {
   background: var(--hover);
 }
 
+/* Mensagens seguidas da mesma pessoa no mesmo dia: a foto e o nome só vêm
+   na primeira do bloco. As de baixo ficam mais coladas e cedem a coluna da
+   esquerda pro horário, que aparece quando o mouse passa. Sem isso o mesmo
+   rosto se repetia linha após linha. */
+.msg--seguida {
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+/* Mesma largura da foto, pra o texto não sair do prumo. */
+.msg__vinco {
+  width: 36px;
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.msg__time--vinco {
+  opacity: 0;
+  font-size: 10px;
+  line-height: 1;
+  transition: opacity 0.1s;
+}
+
+.msg:hover .msg__time--vinco {
+  opacity: 1;
+}
+
 .msg__avatar {
   width: 36px;
   height: 36px;
@@ -702,6 +732,231 @@ textarea {
 
 .chat__input::placeholder {
   color: var(--lavender);
+}
+
+/* ── Anexos do chat ──────────────────────────────────────────────────── */
+/* O clipe e o campo lado a lado; o clipe fica do tamanho dele e o campo
+   come o resto. align-items: flex-end pra que o clipe acompanhe a base
+   quando o textarea cresce com várias linhas. */
+.chat__linha {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.chat__clipe {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
+  color: var(--lavender);
+  transition: background 0.13s, color 0.13s;
+}
+
+.chat__clipe:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--alabaster);
+}
+
+.chat__clipe:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Fica ACIMA do campo, não dentro: assim o texto da legenda continua com a
+   largura toda, e o anexo não empurra o cursor pro lado. */
+.chat__pendente {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: var(--level-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+
+.chat__pendente-nome {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat__pendente-tam {
+  color: var(--lavender);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.chat__pendente-x {
+  display: grid;
+  place-items: center;
+  color: var(--lavender);
+  flex-shrink: 0;
+}
+
+.chat__pendente-x:hover {
+  color: var(--danger);
+}
+
+.chat__erro {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: rgba(229, 72, 77, 0.12);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.anexo {
+  margin-top: 6px;
+  max-width: 400px;
+}
+
+/* A imagem é um botão (clicar amplia), então precisa perder o visual de
+   botão e ficar só com a foto. */
+.anexo--imagem {
+  display: block;
+  padding: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  line-height: 0;
+}
+
+.anexo__img {
+  max-width: 100%;
+  /* Teto de altura pra que uma foto em pé não empurre a conversa inteira
+     pra fora da tela. Quem quiser ver inteira clica e amplia. */
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  transition: border-color 0.13s;
+}
+
+.anexo--imagem:hover .anexo__img {
+  border-color: var(--dusk);
+}
+
+.anexo--audio {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.anexo__player {
+  width: 100%;
+  height: 36px;
+}
+
+.anexo--arquivo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--level-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  text-align: left;
+  transition: border-color 0.13s, background 0.13s;
+}
+
+.anexo--arquivo:hover:not(:disabled) {
+  border-color: var(--dusk);
+  background: var(--level-3);
+}
+
+.anexo--erro {
+  border-color: var(--danger);
+}
+
+.anexo__icone,
+.anexo__baixar {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--lavender);
+}
+
+.anexo__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.anexo__nome {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.anexo__meta {
+  font-size: 11px;
+  color: var(--lavender);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Imagem ampliada ─────────────────────────────────────────────────── */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: rgba(10, 21, 33, 0.92);
+  backdrop-filter: blur(4px);
+}
+
+.lightbox__barra {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+}
+
+.lightbox__nome {
+  font-size: 13px;
+  color: var(--lavender);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lightbox__acao {
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: var(--glass);
+  color: var(--alabaster);
+  font-size: 13px;
+  flex-shrink: 0;
+  transition: background 0.13s;
+}
+
+.lightbox__acao:hover {
+  background: var(--level-3);
+}
+
+.lightbox__img {
+  max-width: 100%;
+  /* min-height: 0 junto do flex acima é o que deixa a imagem encolher pra
+     caber; sem ele ela estoura a altura da tela e some por baixo. */
+  min-height: 0;
+  flex: 1;
+  object-fit: contain;
+  border-radius: var(--radius);
 }
 
 /* ── Botões ──────────────────────────────────────────────────────────── */
@@ -1245,6 +1500,22 @@ textarea {
   width: 100%;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+/* Barrinha de volume numa linha de configuração: o rótulo e o número ficam
+   com o tamanho deles, e o slider come o que sobrar. O min-width: 0 é o que
+   deixa ele encolher — sem isso o width: 100% acima empurra a linha pra
+   fora da caixa. */
+.settings__row--volume .volume__slider {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 3ch cabe o 100 sem a linha pular de largura enquanto a pessoa arrasta. */
+.settings__row--volume .volume__value {
+  font-size: 13px;
+  min-width: 3ch;
+  text-align: right;
 }
 
 /* ── Campos de configuração do OBS ───────────────────────────────────── */

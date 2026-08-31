@@ -161,3 +161,27 @@ export const IconEyeOff = ({ size = 16 }: Props) => (
     <path d="m2 2 20 20" />
   </svg>
 );
+
+/** Clipe: anexar arquivo no chat. */
+export const IconClipe = ({ size = 16 }: Props) => (
+  <svg {...base(size)}>
+    <path d="M21.4 11.1 12.3 20a5.5 5.5 0 0 1-7.8-7.8l9.2-9.1a3.7 3.7 0 1 1 5.2 5.2l-9.2 9.1a1.8 1.8 0 0 1-2.6-2.6l8.5-8.4" />
+  </svg>
+);
+
+/** Folha de papel: o cartão de arquivo pra baixar. */
+export const IconArquivo = ({ size = 16 }: Props) => (
+  <svg {...base(size)}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+    <path d="M14 2v6h6" />
+  </svg>
+);
+
+/** Seta pra baixo numa bandeja: baixar. */
+export const IconBaixar = ({ size = 16 }: Props) => (
+  <svg {...base(size)}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <path d="m7 10 5 5 5-5" />
+    <path d="M12 15V3" />
+  </svg>
+);

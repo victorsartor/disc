@@ -31,6 +31,10 @@ node_modules/
 dist/
 dist-electron/
 release/
+# O build de Linux sai numa pasta à parte (ver publicar-linux.ps1). Precisa
+# de linha própria: "release/" casa com o nome exato, não com o prefixo, e
+# sem isto um AppImage de 100 MB fica esperando pra entrar num commit.
+release-linux/
 .vite/
 
 # Sistema

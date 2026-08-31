@@ -78,11 +78,31 @@ function carregar(ac: AudioContext, url: string): Promise<AudioBuffer> {
   return p;
 }
 
-async function tocarArquivo(ac: AudioContext, url: string): Promise<void> {
+/**
+ * Volume dos sons de evento, de 0 a 1. Mora aqui em vez de ser passado a
+ * cada toque porque quem chama playJoin() e um handler de evento da sala,
+ * que nao tem as configuracoes na mao.
+ */
+let ganhoEfeitos = 1;
+
+/** Recebe a escala do slider (0 a 100). Chamado ao carregar e ao mexer. */
+export function setEffectsVolume(percentual: number): void {
+  const n = Number(percentual);
+  ganhoEfeitos = Number.isFinite(n) ? Math.min(1, Math.max(0, n / 100)) : 1;
+}
+
+async function tocarArquivo(ac: AudioContext, url: string, ganho: number): Promise<void> {
   const buffer = await carregar(ac, url);
   const src = ac.createBufferSource();
   src.buffer = buffer;
-  src.connect(ac.destination);
+
+  // Ganho no meio do caminho em vez de mexer no destination: o destination e
+  // compartilhado com a voz das pessoas, e abaixar ali abaixaria a call
+  // junto.
+  const vol = ac.createGain();
+  vol.gain.value = ganho;
+  src.connect(vol).connect(ac.destination);
+
   src.start();
   await new Promise<void>((pronto) => {
     src.onended = () => pronto();
@@ -90,13 +110,26 @@ async function tocarArquivo(ac: AudioContext, url: string): Promise<void> {
 }
 
 /**
+ * Um som de evento, no volume escolhido.
+ *
+ * No zero nao toca nem abre o contexto. Nao e so economia: e o mesmo motivo
+ * do comentario la em cima - contexto aberto mantem o amplificador do fone
+ * ligado e chiando. Quem zerou os efeitos zerou justamente pra nao ouvir
+ * nada, e seria estranho ganhar um chiado em troca do silencio.
+ */
+function efeito(url: string): void {
+  if (ganhoEfeitos === 0) return;
+  void comContextoAberto((ac) => tocarArquivo(ac, url, ganhoEfeitos));
+}
+
+/**
  * Voce entrou na call. Mesmo arquivo de playJoin de proposito: e o mesmo
  * evento social, "alguem entrou", so que o alguem e voce.
  */
-export const playConnect = () => void comContextoAberto((ac) => tocarArquivo(ac, entrarUrl));
+export const playConnect = () => efeito(entrarUrl);
 
 /** Voce saiu da call - por escolha, troca de canal, ou queda de conexao. */
-export const playDisconnect = () => void comContextoAberto((ac) => tocarArquivo(ac, sairUrl));
+export const playDisconnect = () => efeito(sairUrl);
 
 /**
  * Alguem entrou na call que voce esta.
@@ -105,16 +138,16 @@ export const playDisconnect = () => void comContextoAberto((ac) => tocarArquivo(
  * vive dentro do Room, que so existe depois que voce entrou em um canal.
  * Fora de uma call ninguem ouve ninguem chegar em outra.
  */
-export const playJoin = () => void comContextoAberto((ac) => tocarArquivo(ac, entrarUrl));
+export const playJoin = () => efeito(entrarUrl);
 
 /** Alguem saiu da call que voce esta. Mesma regra do playJoin. */
-export const playLeave = () => void comContextoAberto((ac) => tocarArquivo(ac, sairUrl));
+export const playLeave = () => efeito(sairUrl);
 
 /** Uma tela comecou a ser compartilhada na call - a sua ou a de alguem. */
-export const playShareStart = () => void comContextoAberto((ac) => tocarArquivo(ac, iniciarTelaUrl));
+export const playShareStart = () => efeito(iniciarTelaUrl);
 
 /** Uma tela parou de ser compartilhada na call - a sua ou a de alguem. */
-export const playShareStop = () => void comContextoAberto((ac) => tocarArquivo(ac, fecharTelaUrl));
+export const playShareStop = () => efeito(fecharTelaUrl);
 
 /** Mensagem nova no chat, de outra pessoa. */
-export const playNotify = () => void comContextoAberto((ac) => tocarArquivo(ac, notificacaoUrl));
+export const playNotify = () => efeito(notificacaoUrl);

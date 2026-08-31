@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 /**
  * Unica ponte entre o processo main e o renderer.
@@ -32,7 +32,24 @@ const api = {
   presence: () => ipcRenderer.invoke('api:presence'),
   heartbeat: (ativo: boolean) => ipcRenderer.invoke('api:heartbeat', ativo),
   setStatus: (status: string) => ipcRenderer.invoke('api:set-status', status),
-  sendMessage: (body: string) => ipcRenderer.invoke('api:send-message', body),
+  sendMessage: (body: string, attachmentId?: string) =>
+    ipcRenderer.invoke('api:send-message', body, attachmentId),
+
+  arquivos: {
+    enviar: (caminho: string) => ipcRenderer.invoke('api:upload-file', caminho),
+    enviarImagem: (bytes: Uint8Array, nome: string, mime: string) =>
+      ipcRenderer.invoke('api:upload-image', bytes, nome, mime),
+    baixar: (id: string, nome: string) => ipcRenderer.invoke('api:download-file', id, nome),
+    /**
+     * Caminho de um File escolhido no seletor.
+     *
+     * Sincrono e sem IPC: `File.path` foi removido no Electron 32 e este e o
+     * substituto oficial. Precisa rodar AQUI, no preload - o webUtils nao
+     * existe no renderer, e e justamente essa fronteira que impede uma
+     * pagina de inventar um caminho pra ler.
+     */
+    caminhoDe: (file: File): string => webUtils.getPathForFile(file),
+  },
   roomToken: (channelId: string) => ipcRenderer.invoke('api:room-token', channelId),
   whipConfig: (channelId: string) => ipcRenderer.invoke('api:whip-config', channelId),
 

@@ -16,10 +16,16 @@
          URL.createObjectURL (ver lib/image.ts): o arquivo local vira uma
          URL blob: pra ser medido e redimensionado antes de subir. Sem isto
          o Chromium recusa a imagem e o upload morre com "nao consegui abrir
-         essa imagem", sem dizer que a culpa foi do CSP. -->
+         essa imagem", sem dizer que a culpa foi do CSP.
+
+         media-src carrega https: e o localhost do dev pela mesma razao que
+         img-src: o audio que alguem manda no chat e servido pelo backend, e
+         um <audio> apontando pra la e tratado como midia, nao como imagem.
+         Com 'self' sozinho o Chromium recusa e o player fica mudo SEM erro
+         nenhum - nem no console, nem no elemento. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: http://localhost:3000; media-src 'self' blob:; connect-src 'self' https: wss:;"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: http://localhost:3000; media-src 'self' blob: https: http://localhost:3000; connect-src 'self' https: wss:;"
     />
     <title>Disneia</title>
   </head>

@@ -35,6 +35,28 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);
+
+  -- Anexos do chat. Só os METADADOS ficam aqui; os bytes vão pra
+  -- config.filesDir, um arquivo por id. Ver o comentário do filesDir.
+  --
+  -- message_id nasce NULL: o upload acontece antes de a mensagem existir,
+  -- porque é ele que demora e é ele que pode falhar. Quem sobe e desiste de
+  -- mandar deixa um órfão, e a faxina recolhe (ver arquivos.ts).
+  CREATE TABLE IF NOT EXISTS attachments (
+    id         TEXT PRIMARY KEY,
+    message_id INTEGER REFERENCES messages(id),
+    user_id    TEXT NOT NULL REFERENCES users(id),
+    name       TEXT NOT NULL,
+    mime       TEXT NOT NULL,
+    size       INTEGER NOT NULL,
+    kind       TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
+  -- A faxina varre em ordem de idade, e os órfãos são procurados por
+  -- message_id IS NULL: os dois passam por aqui.
+  CREATE INDEX IF NOT EXISTS idx_attachments_created ON attachments(created_at);
 `);
 
 /**
@@ -100,6 +122,25 @@ export interface ImageRow {
   bytes: Buffer;
 }
 
+/**
+ * Como o chat desenha o anexo. Decidido no upload, a partir do mime.
+ *
+ * 'image' aparece na conversa e amplia no clique, 'audio' ganha um player,
+ * 'file' vira um cartão pra baixar. Guardado em vez de deduzido na hora de
+ * desenhar porque a regra pode mudar, e o que já foi mandado deve continuar
+ * aparecendo do jeito que apareceu quando foi mandado.
+ */
+export type AttachmentKind = 'image' | 'audio' | 'file';
+
+/** O que o cliente precisa saber de um anexo pra desenhá-lo. */
+export interface Attachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  kind: AttachmentKind;
+}
+
 export interface MessageRow {
   id: number;
   body: string;
@@ -107,6 +148,7 @@ export interface MessageRow {
   user_id: string;
   author_name: string;
   author_avatar: string | null;
+  attachments: Attachment[];
 }
 
 const stmts = {
@@ -153,6 +195,39 @@ const stmts = {
     ORDER BY m.id DESC
     LIMIT ?
   `),
+
+  // --- Anexos ------------------------------------------------------------
+  insertAttachment: db.prepare(`
+    INSERT INTO attachments (id, message_id, user_id, name, mime, size, kind, created_at)
+    VALUES (?, NULL, ?, ?, ?, ?, ?, ?)
+  `),
+  findAttachment: db.prepare<[string]>('SELECT * FROM attachments WHERE id = ?'),
+  // A condição toda importa: só o dono, e só enquanto ainda for órfão. Sem
+  // ela, mandar o id de um anexo de outra pessoa numa mensagem sua roubaria
+  // o arquivo dela pro seu balão.
+  attachToMessage: db.prepare(`
+    UPDATE attachments
+       SET message_id = ?
+     WHERE id = ? AND user_id = ? AND message_id IS NULL
+  `),
+  // Os anexos das mesmas mensagens que o recentMessages devolve. Uma
+  // consulta só, com o mesmo LIMIT, em vez de um IN montado com N
+  // interrogações (que viraria um prepared statement diferente por N).
+  attachmentsForRecent: db.prepare<[number]>(`
+    SELECT * FROM attachments
+     WHERE message_id IN (SELECT id FROM messages ORDER BY id DESC LIMIT ?)
+  `),
+  totalAttachmentBytes: db.prepare('SELECT COALESCE(SUM(size), 0) AS total FROM attachments'),
+  // Mais velhos primeiro: é a ordem em que a faxina apaga ao estourar o teto.
+  oldestAttachments: db.prepare<[number]>(
+    'SELECT * FROM attachments ORDER BY created_at ASC LIMIT ?',
+  ),
+  // Subiu e nunca mandou a mensagem. `created_at` é o único relógio que
+  // existe pra eles, já que message_id nunca chegou.
+  orphanAttachments: db.prepare<[number]>(
+    'SELECT * FROM attachments WHERE message_id IS NULL AND created_at < ?',
+  ),
+  deleteAttachment: db.prepare<[string]>('DELETE FROM attachments WHERE id = ?'),
 };
 
 export function findUserByEmail(email: string): User | undefined {
@@ -211,13 +286,90 @@ export function deleteImage(id: string): void {
   stmts.deleteImage.run(id);
 }
 
-export function saveMessage(userId: string, body: string): number {
-  const info = stmts.insertMessage.run(userId, body, Date.now());
-  return Number(info.lastInsertRowid);
+/** O registro inteiro do anexo — o que o servidor usa, não o que o chat vê. */
+export interface AttachmentRecord extends Attachment {
+  message_id: number | null;
+  user_id: string;
+  created_at: number;
+}
+
+export function saveAttachment(a: {
+  id: string;
+  userId: string;
+  name: string;
+  mime: string;
+  size: number;
+  kind: AttachmentKind;
+}): void {
+  stmts.insertAttachment.run(a.id, a.userId, a.name, a.mime, a.size, a.kind, Date.now());
+}
+
+export function findAttachment(id: string): AttachmentRecord | undefined {
+  return stmts.findAttachment.get(id) as AttachmentRecord | undefined;
+}
+
+export function deleteAttachmentRow(id: string): void {
+  stmts.deleteAttachment.run(id);
+}
+
+export function totalAttachmentBytes(): number {
+  return (stmts.totalAttachmentBytes.get() as { total: number }).total;
+}
+
+export function oldestAttachments(limit: number): AttachmentRecord[] {
+  return stmts.oldestAttachments.all(limit) as AttachmentRecord[];
+}
+
+export function orphanAttachments(before: number): AttachmentRecord[] {
+  return stmts.orphanAttachments.all(before) as AttachmentRecord[];
+}
+
+/**
+ * Grava a mensagem e, se houver, amarra o anexo a ela — tudo ou nada.
+ *
+ * A transação existe porque as duas metades não fazem sentido sozinhas: uma
+ * mensagem de anexo cujo anexo não amarrou é um balão vazio no chat de todo
+ * mundo, e sem jeito de consertar depois. Se o UPDATE não pegar nenhuma
+ * linha (anexo de outra pessoa, ou já usado em outra mensagem), o throw
+ * desfaz o INSERT junto.
+ */
+const inserirMensagem = db.transaction(
+  (userId: string, body: string, attachmentId: string | null): number => {
+    const info = stmts.insertMessage.run(userId, body, Date.now());
+    const id = Number(info.lastInsertRowid);
+    if (attachmentId) {
+      const r = stmts.attachToMessage.run(id, attachmentId, userId);
+      if (r.changes === 0) throw new Error('anexo inválido');
+    }
+    return id;
+  },
+);
+
+export function saveMessage(
+  userId: string,
+  body: string,
+  attachmentId: string | null = null,
+): number {
+  return inserirMensagem(userId, body, attachmentId);
 }
 
 export function recentMessages(limit = 100): MessageRow[] {
-  return (stmts.recentMessages.all(limit) as MessageRow[]).reverse();
+  const linhas = (stmts.recentMessages.all(limit) as MessageRow[]).reverse();
+
+  // Os anexos vêm numa segunda consulta e são distribuídos aqui. Um JOIN
+  // duplicaria a mensagem por anexo, e desduplicar depois custa mais que
+  // este mapa.
+  const porMensagem = new Map<number, Attachment[]>();
+  for (const a of stmts.attachmentsForRecent.all(limit) as AttachmentRecord[]) {
+    if (a.message_id === null) continue;
+    const lista = porMensagem.get(a.message_id);
+    const item: Attachment = { id: a.id, name: a.name, mime: a.mime, size: a.size, kind: a.kind };
+    if (lista) lista.push(item);
+    else porMensagem.set(a.message_id, [item]);
+  }
+
+  for (const m of linhas) m.attachments = porMensagem.get(m.id) ?? [];
+  return linhas;
 }
 
 /**
