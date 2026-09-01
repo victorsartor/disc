@@ -10,6 +10,16 @@ export interface Me {
   avatarUrl: string | null;
   channels: Channel[];
   livekitUrl: string;
+  /**
+   * Pode apagar mensagem dos outros. Vem do ADMIN_EMAILS do servidor.
+   *
+   * Serve pra tela decidir se DESENHA o botão. Quem decide se a mensagem some
+   * é a rota, que confere de novo — esconder botão nunca foi controle de
+   * acesso.
+   */
+  isAdmin: boolean;
+  /** A tirinha de reações. Vem do servidor pra não haver duas listas. */
+  reactionEmojis: string[];
 }
 
 /**
@@ -94,6 +104,31 @@ export interface NovaEnquete {
   multi: boolean;
 }
 
+/**
+ * Uma reação, já agrupada por emoji pelo servidor.
+ *
+ * `users` traz os ids em vez de só a contagem — mesma escolha do PollOption.
+ * É o que deixa o tooltip dizer quem reagiu e o chip saber se VOCÊ está
+ * dentro, sem uma segunda consulta.
+ */
+export interface Reaction {
+  emoji: string;
+  users: string[];
+}
+
+/**
+ * O pedacinho da mensagem que está sendo respondida.
+ *
+ * O `snippet` chega pronto do servidor e é recalculado a cada leitura: se a
+ * original for editada ou apagada, o card muda junto. Nunca é o texto
+ * congelado no momento em que a resposta foi escrita.
+ */
+export interface ReplyPreview {
+  id: number;
+  author_name: string;
+  snippet: string;
+}
+
 export interface Message {
   id: number;
   body: string;
@@ -115,6 +150,17 @@ export interface Message {
    * voto no cliente a partir do que chegou pelo data channel.
    */
   poll?: Poll | null;
+  /** Vazio na maioria. Opcional pelo mesmo motivo dos anexos: app antigo. */
+  reactions?: Reaction[];
+  /** Quando foi editada. null/ausente = nunca foi. */
+  edited_at?: number | null;
+  /**
+   * Lápide. O servidor já mandou tudo vazio — texto, anexo, enquete e
+   * reações — e a tela desenha "mensagem removida" no lugar.
+   */
+  deleted?: boolean;
+  /** A mensagem que esta responde, ou null. */
+  reply_to?: ReplyPreview | null;
 }
 
 /**
@@ -275,7 +321,28 @@ export interface DiscApi {
     body: string,
     attachmentId?: string,
     poll?: NovaEnquete,
+    replyToId?: number,
   ): Promise<{ message: Message }>;
+  /**
+   * Editar, apagar e reagir devolvem a MENSAGEM INTEIRA já remontada, não um
+   * "ok". É o que permite aplicar o resultado sem adivinhar como ficou — e o
+   * que faz o caminho rápido (data channel) e o polling de 3s concordarem,
+   * já que os dois carregam exatamente o mesmo objeto.
+   */
+  editMessage(id: number, body: string): Promise<{ message: Message }>;
+  /** Vira lápide. Autor sempre; mensagem dos outros só com isAdmin. */
+  deleteMessage(id: number): Promise<{ message: Message }>;
+  /**
+   * Segundo estágio: tira a lápide da conversa de vez.
+   *
+   * Não devolve mensagem porque não há mais mensagem — devolve o id, que é
+   * o que basta pra tirar da lista. Só aceita mensagem que JÁ é lápide: é
+   * o que obriga a passar antes pelo deleteMessage, que é quem apaga os
+   * bytes do anexo.
+   */
+  purgeMessage(id: number): Promise<{ removed: boolean; id: number }>;
+  /** Liga/desliga a SUA reação. Mandar duas vezes volta ao estado inicial. */
+  reactMessage(id: number, emoji: string): Promise<{ message: Message }>;
   polls: {
     /**
      * A apuração de agora. Serve o aviso de voto do data channel: quem

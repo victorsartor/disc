@@ -116,8 +116,14 @@ function limparNome(bruto: string): string {
   return limpo || 'arquivo';
 }
 
-/** Apaga os bytes e a linha. Some dos dois lugares ou de nenhum. */
-function apagar(id: string): void {
+/**
+ * Apaga os bytes e a linha. Some dos dois lugares ou de nenhum.
+ *
+ * Exportado porque apagar mensagem também passa por aqui: a lápide leva o
+ * anexo junto, e a faxina não recolheria esse arquivo nunca (ela procura
+ * message_id NULL, e o dele continua preenchido). Ver deleteMessage no db.ts.
+ */
+export function apagarAnexo(id: string): void {
   try {
     rmSync(caminho(id), { force: true });
   } catch (err) {
@@ -141,7 +147,7 @@ const VALIDADE_ORFAO = 60 * 60 * 1000;
  * Roda depois de cada upload, que é o único momento em que o total cresce.
  */
 function faxina(): void {
-  for (const a of orphanAttachments(Date.now() - VALIDADE_ORFAO)) apagar(a.id);
+  for (const a of orphanAttachments(Date.now() - VALIDADE_ORFAO)) apagarAnexo(a.id);
 
   let total = totalAttachmentBytes();
   if (total <= MAX_TOTAL_BYTES) return;
@@ -152,7 +158,7 @@ function faxina(): void {
     const lote = oldestAttachments(50);
     if (lote.length === 0) break;
     for (const a of lote) {
-      apagar(a.id);
+      apagarAnexo(a.id);
       total -= a.size;
       if (total <= MAX_TOTAL_BYTES) break;
     }

@@ -17,6 +17,33 @@ import { IconScreen, IconBroadcast, IconEye, IconEyeOff } from './components/Ico
 import { DEFAULT_THEME, isThemeId, type ThemeId } from './lib/themes';
 import { playNotify } from './lib/sounds';
 
+/**
+ * Duas versões da MESMA mensagem dizem a mesma coisa?
+ *
+ * Roda 100 vezes a cada 3 segundos, então a ordem das perguntas é a ordem
+ * do que é barato: os três escalares primeiro, e o JSON.stringify só nos
+ * casos raros em que existe reação ou enquete pra comparar. A esmagadora
+ * maioria das mensagens sai na primeira linha.
+ *
+ * Não compara anexo: o único jeito de a lista de anexos mudar é a mensagem
+ * virar lápide, e `deleted` já pega isso.
+ */
+function mesmoConteudo(a: Message, b: Message): boolean {
+  if (a.body !== b.body) return false;
+  if ((a.edited_at ?? null) !== (b.edited_at ?? null)) return false;
+  if ((a.deleted ?? false) !== (b.deleted ?? false)) return false;
+
+  const ra = a.reactions ?? [];
+  const rb = b.reactions ?? [];
+  if (ra.length !== rb.length) return false;
+  if (ra.length > 0 && JSON.stringify(ra) !== JSON.stringify(rb)) return false;
+
+  if (Boolean(a.poll) !== Boolean(b.poll)) return false;
+  if (a.poll && b.poll && JSON.stringify(a.poll) !== JSON.stringify(b.poll)) return false;
+
+  return true;
+}
+
 export function App() {
   const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
   const [me, setMe] = useState<Me | null>(null);
@@ -43,6 +70,10 @@ export function App() {
   // fase do histórico recriaria a função e, com ela, o `room` que a usa.
   const meRef = useRef<Me | null>(null);
   meRef.current = me;
+  // Espelho da lista, pra quem precisa do valor de AGORA fora de um
+  // atualizador de estado — é o caso da detecção de mensagem removida.
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
   // true só depois que a primeira leva de mensagens (o histórico) já
   // passou. Sem isto, entrar num canal com conversa parada tocaria uma
   // notificação pra cada mensagem antiga.
@@ -56,48 +87,105 @@ export function App() {
   }, []);
 
   /**
-   * Guarda uma apuração nova na mensagem que carrega a enquete.
+   * Troca uma mensagem já na lista pela versão nova que o servidor devolveu.
    *
-   * Mexe só no `poll` da mensagem, e não na lista: o addMessage ignora id
-   * já visto (é o que impede o data channel e o polling de duplicarem), e
-   * uma enquete muda muitas vezes depois de a mensagem ter chegado.
+   * É o caminho de tudo que MUDA depois de a mensagem existir — editar,
+   * apagar, reagir. Tem que ser separado do addMessage porque ele ignora id
+   * já visto: é justamente esse ignorar que impede o data channel e o
+   * polling de duplicarem cada mensagem nova.
+   *
+   * Mensagem que não está na lista é ignorada de propósito: quem acabou de
+   * abrir o app pode receber o aviso de uma alteração antes do histórico
+   * chegar, e inserir aqui a colocaria fora de ordem. O polling traz.
+   */
+  const aplicarMensagem = useCallback((m: Message) => {
+    setMessages((prev) => {
+      const i = prev.findIndex((x) => x.id === m.id);
+      if (i === -1) return prev;
+      const proximo = prev.slice();
+      proximo[i] = m;
+      return proximo;
+    });
+  }, []);
+
+  /**
+   * Tira mensagens da lista — e da memória de ids já vistos.
+   *
+   * Limpar o `seenRef` junto é o que torna a remoção AUTOCORRIGÍVEL: se ela
+   * acontecer por engano, a próxima volta do polling encontra a mensagem no
+   * servidor e o addMessage a recoloca no lugar certo (ele ordena por id).
+   * Mantendo o id no `seen`, um engano seria permanente até fechar o app —
+   * e o engano é justamente o que a heurística de janela lá embaixo pode
+   * cometer.
+   */
+  const removerMensagens = useCallback((ids: number[]) => {
+    if (ids.length === 0) return;
+    const fora = new Set(ids);
+    for (const id of fora) seenRef.current.delete(id);
+    setMessages((prev) => {
+      const proximo = prev.filter((m) => !fora.has(m.id));
+      return proximo.length === prev.length ? prev : proximo;
+    });
+  }, []);
+
+  /**
+   * Reconcilia o que o polling trouxe com o que já está na tela.
+   *
+   * Só troca o objeto quando o conteúdo mudou de verdade. Sem essa
+   * comparação, a cada 3 segundos a lista inteira viraria objetos novos e o
+   * chat re-renderizaria sozinho para sempre — inclusive com ninguém
+   * mexendo em nada.
+   *
+   * Cobre o que envelhece depois do envio: a apuração da enquete, o texto
+   * editado, a lápide, as reações — e o sumiço, quando alguém remove a
+   * lápide de vez. O addMessage não ajudaria em nenhum deles: ele só olha
+   * ids que nunca viu.
+   *
+   * A REMOÇÃO precisa de cuidado. O servidor devolve só as 100 mais novas,
+   * então "não veio na resposta" não significa "não existe mais" — pode ser
+   * uma mensagem antiga que saiu da janela enquanto a conversa andava. Por
+   * isso só some quem está DENTRO da faixa que chegou: id maior ou igual ao
+   * mais antigo da resposta. Abaixo disso a resposta não tem opinião.
+   */
+  const sincronizarMensagens = useCallback((chegaram: Message[]) => {
+    const porId = new Map(chegaram.map((m) => [m.id, m]));
+
+    setMessages((prev) => {
+      let mudou = false;
+      const proximo = prev.map((atual) => {
+        const nova = porId.get(atual.id);
+        if (!nova || mesmoConteudo(atual, nova)) return atual;
+        mudou = true;
+        return nova;
+      });
+      return mudou ? proximo : prev;
+    });
+
+    // O sumiço é uma passada à parte, lendo o estado pelo ref em vez de por
+    // dentro do atualizador: ele também mexe no seenRef, e efeito colateral
+    // dentro de um atualizador roda duas vezes no StrictMode.
+    //
+    // `chegaram` vem do mais antigo pro mais novo (o servidor reverte).
+    const inicioDaJanela = chegaram.length > 0 ? chegaram[0].id : null;
+    if (inicioDaJanela === null) return;
+
+    removerMensagens(
+      messagesRef.current
+        .filter((m) => m.id >= inicioDaJanela && !porId.has(m.id))
+        .map((m) => m.id),
+    );
+  }, [removerMensagens]);
+
+  /**
+   * Aplica uma apuração avulsa, sem mexer no resto da mensagem.
+   *
+   * Serve o retorno do próprio voto e a reconsulta disparada pelo aviso do
+   * data channel — nos dois casos só a enquete mudou.
    */
   const aplicarPoll = useCallback((poll: Poll) => {
     setMessages((prev) =>
       prev.map((m) => (m.poll?.id === poll.id ? { ...m, poll } : m)),
     );
-  }, []);
-
-  /**
-   * Alguém votou numa enquete: pergunta ao servidor como ficou.
-   *
-   * Nunca somar a partir do aviso. O aviso diz QUE mudou, não QUANTO — um
-   * que se perdesse no caminho deixaria este app com um número a menos pra
-   * sempre, sem nada que o corrigisse até alguém reabrir o app.
-   */
-  /**
-   * Aplica as apurações que vieram junto do polling de mensagens.
-   *
-   * Só troca o objeto quando a apuração mudou de verdade. Sem essa
-   * comparação, a cada 3 segundos a lista inteira de mensagens viraria
-   * objetos novos e o chat re-renderizaria sozinho para sempre — inclusive
-   * enquanto ninguém está votando em nada.
-   */
-  const sincronizarPolls = useCallback((chegaram: Message[]) => {
-    const novas = new Map<number, Poll>();
-    for (const m of chegaram) if (m.poll) novas.set(m.poll.id, m.poll);
-    if (novas.size === 0) return;
-
-    setMessages((prev) => {
-      let mudou = false;
-      const proximo = prev.map((m) => {
-        const nova = m.poll ? novas.get(m.poll.id) : undefined;
-        if (!nova || JSON.stringify(nova) === JSON.stringify(m.poll)) return m;
-        mudou = true;
-        return { ...m, poll: nova };
-      });
-      return mudou ? proximo : prev;
-    });
   }, []);
 
   const recontarPoll = useCallback((pollId: number) => {
@@ -109,7 +197,49 @@ export function App() {
       });
   }, [aplicarPoll]);
 
-  const room = useRoom(addMessage, recontarPoll);
+  const removerUma = useCallback((id: number) => removerMensagens([id]), [removerMensagens]);
+
+  const room = useRoom(addMessage, recontarPoll, aplicarMensagem, removerUma);
+
+  /**
+   * Editar, apagar e reagir seguem o mesmo desenho, e é de propósito.
+   *
+   * Os três mandam pro servidor, recebem a MENSAGEM INTEIRA remontada de
+   * volta, aplicam na lista e retransmitem esse mesmo objeto pela sala.
+   * Ninguém calcula localmente como a mensagem ficou — nem o autor, nem
+   * quem recebe. Foi a lição da enquete: quem soma no cliente acaba com
+   * dois apps discordando e nada que os reconcilie.
+   */
+  const editarMensagem = useCallback(async (id: number, body: string) => {
+    const { message } = await window.disc.editMessage(id, body);
+    aplicarMensagem(message);
+    await room.broadcastMessageChanged(message);
+  }, [aplicarMensagem, room]);
+
+  const apagarMensagem = useCallback(async (id: number) => {
+    const { message } = await window.disc.deleteMessage(id);
+    aplicarMensagem(message);
+    await room.broadcastMessageChanged(message);
+  }, [aplicarMensagem, room]);
+
+  const reagir = useCallback(async (id: number, emoji: string) => {
+    const { message } = await window.disc.reactMessage(id, emoji);
+    aplicarMensagem(message);
+    await room.broadcastMessageChanged(message);
+  }, [aplicarMensagem, room]);
+
+  /**
+   * Segundo estágio: a lápide sai da conversa.
+   *
+   * Só o id viaja de volta — não existe mais mensagem pra mandar. Quem está
+   * na sala tira na hora; quem está fora descobre no polling, que deixa de
+   * trazer a mensagem (ver a detecção de janela no sincronizarMensagens).
+   */
+  const removerDeVez = useCallback(async (id: number) => {
+    await window.disc.purgeMessage(id);
+    removerMensagens([id]);
+    await room.broadcastMessageRemoved(id);
+  }, [removerMensagens, room]);
 
   // O tema mora nas configurações da máquina e vale pro documento inteiro:
   // quem pinta é o CSS, a partir deste atributo no <html>.
@@ -206,11 +336,12 @@ export function App() {
         const { messages } = await window.disc.messages();
         if (!alive) return;
         for (const m of messages) addMessage(m);
-        // As enquetes precisam de uma segunda passada: o addMessage ignora
-        // mensagem já vista, e é justamente a apuração de uma mensagem
-        // ANTIGA que muda quando alguém vota. Este é o caminho de quem não
-        // está na mesma sala de voz — o data channel só alcança quem está.
-        sincronizarPolls(messages);
+        // Segunda passada, porque o addMessage ignora mensagem já vista: é
+        // justamente numa mensagem ANTIGA que a apuração muda, o texto é
+        // editado, a lápide aparece e a reação entra. Este é o caminho de
+        // quem não está na mesma sala de voz — o data channel só alcança
+        // quem está.
+        sincronizarMensagens(messages);
       } catch {
         /* offline momentâneo: a próxima volta pega */
       } finally {
@@ -226,14 +357,15 @@ export function App() {
       alive = false;
       clearInterval(id);
     };
-  }, [loggedIn, addMessage, sincronizarPolls]);
+  }, [loggedIn, addMessage, sincronizarMensagens]);
 
   const sendChat = useCallback(async (
     body: string,
     attachmentId?: string,
     poll?: NovaEnquete,
+    replyToId?: number,
   ) => {
-    const { message } = await window.disc.sendMessage(body, attachmentId, poll);
+    const { message } = await window.disc.sendMessage(body, attachmentId, poll, replyToId);
     addMessage(message);
     await room.broadcastChat(message);
   }, [addMessage, room]);
@@ -371,9 +503,18 @@ export function App() {
           onOpenUser={openUser}
           chatVolume={room.settings?.chatVolume ?? 100}
           meId={me.id}
+          // Padrões defensivos: um servidor anterior a esta versão não manda
+          // nenhum dos dois, e um reactionEmojis undefined quebraria o .map
+          // da tirinha em vez de só não desenhar nada.
+          isAdmin={me.isAdmin ?? false}
+          reactionEmojis={me.reactionEmojis ?? []}
           nomeDe={nomeDe}
           onApurarPoll={aplicarPoll}
           onVotou={room.broadcastVote}
+          onEditar={editarMensagem}
+          onApagar={apagarMensagem}
+          onReagir={reagir}
+          onRemoverDeVez={removerDeVez}
         />
       </div>
 

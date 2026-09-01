@@ -32,8 +32,14 @@ const api = {
   presence: () => ipcRenderer.invoke('api:presence'),
   heartbeat: (ativo: boolean) => ipcRenderer.invoke('api:heartbeat', ativo),
   setStatus: (status: string) => ipcRenderer.invoke('api:set-status', status),
-  sendMessage: (body: string, attachmentId?: string, poll?: unknown) =>
-    ipcRenderer.invoke('api:send-message', body, attachmentId, poll),
+  sendMessage: (body: string, attachmentId?: string, poll?: unknown, replyToId?: number) =>
+    ipcRenderer.invoke('api:send-message', body, attachmentId, poll, replyToId),
+  editMessage: (id: number, body: string) =>
+    ipcRenderer.invoke('api:edit-message', id, body),
+  deleteMessage: (id: number) => ipcRenderer.invoke('api:delete-message', id),
+  purgeMessage: (id: number) => ipcRenderer.invoke('api:purge-message', id),
+  reactMessage: (id: number, emoji: string) =>
+    ipcRenderer.invoke('api:react-message', id, emoji),
 
   polls: {
     of: (id: number) => ipcRenderer.invoke('api:poll', id),

@@ -678,6 +678,8 @@ textarea {
   padding: 5px 10px;
   border-radius: var(--radius);
   transition: background 0.1s;
+  /* Âncora da barra de ações, que flutua no canto de cima à direita. */
+  position: relative;
 }
 
 .msg:hover {
@@ -752,6 +754,258 @@ textarea {
   overflow-wrap: anywhere;
   user-select: text;
   color: var(--alabaster);
+}
+
+/* ── Ações da mensagem (0.31) ─────────────────────────────────────────── */
+
+/* Flutua sobre o canto de cima à direita, meio degrau acima do balão, do
+   jeito que o Discord e o Slack fazem: aparecer no fluxo empurraria o texto
+   e a conversa inteira dançaria a cada passada de mouse. */
+.msg__acoes {
+  position: absolute;
+  top: -12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--level-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+  z-index: 2;
+}
+
+/* focus-within mantém a barra na tela pra quem chegou pelo teclado: sem
+   ele, dar Tab até o botão de apagar o esconderia debaixo do foco. */
+.msg:hover .msg__acoes,
+.msg__acoes:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.msg__acao {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--lavender);
+  transition: background 0.1s, color 0.1s;
+}
+
+.msg__acao:hover {
+  background: var(--hover);
+  color: var(--alabaster);
+}
+
+.msg__acao--perigo:hover {
+  color: var(--danger);
+}
+
+/* A tirinha toma o lugar dos botões dentro da mesma barra, e não abre um
+   popover por cima: assim ela nasce onde o mouse já está, e sair do balão
+   fecha tudo de uma vez (ver o onMouseLeave no Chat.tsx). */
+.msg__emojis {
+  display: flex;
+  gap: 1px;
+}
+
+.msg__emoji {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+  transition: background 0.1s, transform 0.08s;
+}
+
+.msg__emoji:hover {
+  background: var(--hover);
+  transform: scale(1.18);
+}
+
+/* ── Reações ──────────────────────────────────────────────────────────── */
+.msg__reacoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.reacao {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--level-0);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.5;
+  transition: border-color 0.1s, background 0.1s;
+}
+
+.reacao:hover {
+  background: var(--hover);
+}
+
+/* A sua reação fica com a borda de destaque — é o que distingue "duas
+   pessoas reagiram" de "duas pessoas reagiram e uma sou eu", que é a única
+   coisa que o número sozinho não conta. */
+.reacao--minha {
+  border-color: var(--dusk);
+  background: color-mix(in srgb, var(--dusk) 22%, transparent);
+}
+
+.reacao__emoji {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.reacao__conta {
+  color: var(--lavender);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.reacao--minha .reacao__conta {
+  color: var(--alabaster);
+}
+
+/* ── Citação (responder) ──────────────────────────────────────────────── */
+/* O fio à esquerda amarra visualmente a citação ao balão de baixo: sem ele
+   ela pareceria uma mensagem própria, meia altura acima da real. */
+.msg__citacao {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  max-width: 100%;
+  margin-bottom: 2px;
+  padding-left: 8px;
+  border-left: 2px solid var(--dusk);
+  font-size: 12.5px;
+  color: var(--lavender);
+  text-align: left;
+  transition: color 0.1s;
+}
+
+.msg__citacao:hover {
+  color: var(--alabaster);
+}
+
+.msg__citacao-quem {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Uma linha só, sempre. Uma citação que cresce com o texto citado ocuparia
+   mais espaço que a própria resposta. */
+.msg__citacao-texto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* Pisca depois do pulo, pra o olho achar a mensagem que estava sendo
+   procurada — o scroll sozinho deixa a pessoa recontando qual era. */
+.msg--destacada {
+  animation: msg-destaque 1.6s ease-out;
+}
+
+@keyframes msg-destaque {
+  0%, 45% { background: color-mix(in srgb, var(--dusk) 45%, transparent); }
+  100%    { background: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg--destacada { animation: none; background: var(--hover); }
+}
+
+/* ── Editado e apagado ────────────────────────────────────────────────── */
+.msg__editado {
+  margin-left: 6px;
+  font-size: 10.5px;
+  color: var(--lavender);
+  user-select: none;
+}
+
+.msg__texto-removido {
+  font-size: 14px;
+  line-height: 1.45;
+  font-style: italic;
+  color: var(--lavender);
+}
+
+/* O botão do segundo estágio. Nasce discreto como os outros e só fica
+   vermelho depois do primeiro clique — a cor é o aviso de que o próximo
+   clique não tem volta. */
+.msg__remover {
+  display: grid;
+  place-items: center;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--lavender);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: background 0.1s, color 0.1s;
+}
+
+.msg__remover:hover {
+  background: var(--hover);
+  color: var(--danger);
+}
+
+.msg__remover--confirma {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.msg__edicao-dica {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--lavender);
+}
+
+.msg__edicao-erro {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--danger);
+}
+
+/* ── Barra de "respondendo a" no composer ─────────────────────────────── */
+.chat__respondendo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  background: var(--level-0);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--dusk);
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  color: var(--lavender);
+}
+
+.chat__respondendo-quem {
+  font-weight: 600;
+  color: var(--alabaster);
+  flex-shrink: 0;
+}
+
+.chat__respondendo-texto {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat__composer {

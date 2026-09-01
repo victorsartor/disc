@@ -1,12 +1,23 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Attachment, Message, NovaEnquete, Poll } from '../types';
 import { Avatar } from './Profile';
 import { Anexo, Lightbox, tamanhoLegivel } from './Anexo';
 import { Enquete, NovaEnqueteForm } from './Enquete';
-import { IconClipe, IconClose, IconDescer, IconEnquete } from './Icons';
+import {
+  IconClipe, IconClose, IconDescer, IconEnquete,
+  IconReagir, IconResponder, IconLapis, IconLixeira,
+} from './Icons';
 import { ehImagemAnimada, prepareChatImage } from '../lib/image';
+import { mensagemDeErro } from '../lib/erros';
 
 const timeFmt = new Intl.DateTimeFormat('pt-BR', {
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+const dataHoraFmt = new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit',
+  month: '2-digit',
   hour: '2-digit',
   minute: '2-digit',
 });
@@ -32,28 +43,45 @@ const MAX_BYTES = 200 * 1024 * 1024;
 
 interface Props {
   messages: Message[];
-  onSend: (body: string, attachmentId?: string, poll?: NovaEnquete) => Promise<void>;
+  onSend: (
+    body: string,
+    attachmentId?: string,
+    poll?: NovaEnquete,
+    replyToId?: number,
+  ) => Promise<void>;
   /** Clicar na foto ou no nome de quem escreveu abre o perfil da pessoa. */
   onOpenUser: (identity: string) => void;
   /** Volume dos áudios do chat, 0 a 100. Vem das configurações. */
   chatVolume: number;
   /** Pra saber em que opção da enquete VOCÊ votou. */
   meId: string;
+  /** Pode apagar mensagem dos outros. Vem do /api/me. */
+  isAdmin: boolean;
+  /** A tirinha de emojis, na ordem em que o servidor a define. */
+  reactionEmojis: string[];
   /** Como mostrar quem votou. 'Você' pra si mesmo. */
   nomeDe: (id: string) => string;
   /** Guarda a apuração nova que o servidor devolveu depois de um voto. */
   onApurarPoll: (poll: Poll) => void;
   /** Avisa a sala que o voto mudou, pra quem está nela reconsultar. */
   onVotou: (pollId: number) => void;
+  /** Os três devolvem a mensagem remontada, que o App aplica na lista. */
+  onEditar: (id: number, body: string) => Promise<void>;
+  onApagar: (id: number) => Promise<void>;
+  onReagir: (id: number, emoji: string) => Promise<void>;
+  /** Segundo estágio: tira a lápide da conversa. Só em mensagem já apagada. */
+  onRemoverDeVez: (id: number) => Promise<void>;
 }
 
 export function Chat({
-  messages, onSend, onOpenUser, chatVolume, meId, nomeDe, onApurarPoll, onVotou,
+  messages, onSend, onOpenUser, chatVolume, meId, isAdmin, reactionEmojis,
+  nomeDe, onApurarPoll, onVotou, onEditar, onApagar, onReagir, onRemoverDeVez,
 }: Props) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const listaRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   /** Preso no fim. Só um gesto da PESSOA solta — ver conferirPino. */
   const pinnedRef = useRef(true);
   /** Instante do último gesto de rolagem feito pela pessoa. */
@@ -63,6 +91,20 @@ export function Chat({
   const fileRef = useRef<HTMLInputElement>(null);
   /** Aberto = o formulário de enquete no lugar da caixa de texto. */
   const [enquetando, setEnquetando] = useState(false);
+
+  /** A mensagem que o composer está respondendo. null = mensagem solta. */
+  const [respondendo, setRespondendo] = useState<Message | null>(null);
+  /**
+   * O balão de cada mensagem, pra citação conseguir rolar até a original.
+   *
+   * Mapa em ref, e não estado: ele muda a cada montagem de linha e nada na
+   * tela depende do conteúdo dele pra desenhar — só o clique na citação
+   * consulta, e só no momento do clique.
+   */
+  const balaoRefs = useRef(new Map<number, HTMLDivElement>());
+  /** Qual mensagem está piscando depois de um pulo de citação. */
+  const [destacada, setDestacada] = useState<number | null>(null);
+  const destaqueTimer = useRef<number | null>(null);
 
   /** Já subiu e está esperando a mensagem que vai carregá-lo. */
   const [pendente, setPendente] = useState<Attachment | null>(null);
@@ -125,6 +167,26 @@ export function Chat({
     el.scrollTop = el.scrollHeight;
     pinnedRef.current = true;
     setNoFim(true);
+  };
+
+  /**
+   * Rola até a mensagem citada e a faz piscar.
+   *
+   * Some sem alarde quando a original não está carregada: o chat só tem as
+   * últimas cem mensagens e não existe paginação, então citar algo mais
+   * antigo que isso é um pulo que não tem pra onde ir. Um aviso explica; um
+   * scroll que não acontece deixaria a pessoa clicando de novo.
+   */
+  const pularPara = (id: number) => {
+    const alvo = balaoRefs.current.get(id);
+    if (!alvo) {
+      setErro('Essa mensagem é antiga demais e não está mais carregada aqui.');
+      return;
+    }
+    alvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setDestacada(id);
+    if (destaqueTimer.current) window.clearTimeout(destaqueTimer.current);
+    destaqueTimer.current = window.setTimeout(() => setDestacada(null), 1600);
   };
 
   /**
@@ -202,9 +264,53 @@ export function Chat({
       setNoFim(true);
     } catch (err) {
       console.error(err);
-      setErro('Não consegui criar a enquete.');
+      setErro(mensagemDeErro(err, 'Não consegui criar a enquete.'));
     } finally {
       setSending(false);
+    }
+  };
+
+  const responder = (m: Message) => {
+    setRespondendo(m);
+    setEnquetando(false);
+    inputRef.current?.focus();
+  };
+
+  /**
+   * Reagir e apagar passam por aqui só pra ter onde a falha aparecer.
+   *
+   * Sem isto o clique virava `void promessa` e uma recusa do servidor — um
+   * 403, a rede caindo, o servidor ainda na versão anterior — não deixava
+   * rastro nenhum na tela: o balão simplesmente não mudava, e não havia como
+   * distinguir isso de um clique que não pegou.
+   */
+  const reagir = async (id: number, emoji: string) => {
+    setErro(null);
+    try {
+      await onReagir(id, emoji);
+    } catch (err) {
+      console.error(err);
+      setErro(mensagemDeErro(err, 'Não consegui registrar essa reação.'));
+    }
+  };
+
+  const apagar = async (id: number) => {
+    setErro(null);
+    try {
+      await onApagar(id);
+    } catch (err) {
+      console.error(err);
+      setErro(mensagemDeErro(err, 'Não consegui apagar essa mensagem.'));
+    }
+  };
+
+  const removerDeVez = async (id: number) => {
+    setErro(null);
+    try {
+      await onRemoverDeVez(id);
+    } catch (err) {
+      console.error(err);
+      setErro(mensagemDeErro(err, 'Não consegui tirar essa mensagem da conversa.'));
     }
   };
 
@@ -215,14 +321,15 @@ export function Chat({
     setSending(true);
     setErro(null);
     try {
-      await onSend(text, pendente?.id);
+      await onSend(text, pendente?.id, undefined, respondendo?.id);
       setDraft('');
       setPendente(null);
+      setRespondendo(null);
       pinnedRef.current = true;
       setNoFim(true);
     } catch (err) {
       console.error(err);
-      setErro('Não consegui mandar a mensagem.');
+      setErro(mensagemDeErro(err, 'Não consegui mandar a mensagem.'));
     } finally {
       setSending(false);
     }
@@ -260,74 +367,42 @@ export function Chat({
         ) : (
           messages.map((m, i) => {
             const anterior = messages[i - 1];
+            // Uma lápide nunca se agrupa com a de cima, e nunca deixa a de
+            // baixo se agrupar nela: sem o cabeçalho, "mensagem removida"
+            // apareceria pendurada num nome que é de outra mensagem.
             const seguida =
               anterior !== undefined &&
               anterior.user_id === m.user_id &&
+              !anterior.deleted &&
+              !m.deleted &&
               mesmoDia(anterior.created_at, m.created_at);
 
-            const hora = timeFmt.format(m.created_at);
-
             return (
-              <div className={seguida ? 'msg msg--seguida' : 'msg'} key={m.id}>
-                {seguida ? (
-                  // Segura a coluna da esquerda no lugar da foto e guarda o
-                  // horário, que só aparece quando o mouse passa por cima.
-                  <div className="msg__vinco">
-                    <span
-                      className="msg__time msg__time--vinco"
-                      title={`${m.author_name} às ${hora}`}
-                    >
-                      {hora}
-                    </span>
-                  </div>
-                ) : (
-                  <button
-                    className="msg__avatar-btn"
-                    onClick={() => onOpenUser(m.user_id)}
-                    title={`Ver o perfil de ${m.author_name}`}
-                  >
-                    <Avatar
-                      url={m.author_avatar}
-                      name={m.author_name}
-                      size={36}
-                      className="msg__avatar"
-                    />
-                  </button>
-                )}
-                <div className="msg__body">
-                  {!seguida && (
-                    <div className="msg__head">
-                      <button
-                        className="msg__author msg__author--botao"
-                        onClick={() => onOpenUser(m.user_id)}
-                      >
-                        {m.author_name}
-                      </button>
-                      <span className="msg__time">{hora}</span>
-                    </div>
-                  )}
-                  {/* Texto puro via children do React — escapado automaticamente.
-                      Nada de dangerouslySetInnerHTML aqui. */}
-                  {m.body && <div className="msg__text">{m.body}</div>}
-                  {m.attachments?.map((a) => (
-                    <Anexo
-                      key={a.id}
-                      anexo={a}
-                      chatVolume={chatVolume}
-                      onAmpliar={setAmpliada}
-                    />
-                  ))}
-                  {m.poll && (
-                    <Enquete
-                      poll={m.poll}
-                      meId={meId}
-                      nomeDe={nomeDe}
-                      onApurar={onApurarPoll}
-                      onVotou={onVotou}
-                    />
-                  )}
-                </div>
-              </div>
+              <Balao
+                key={m.id}
+                m={m}
+                seguida={seguida}
+                meId={meId}
+                isAdmin={isAdmin}
+                reactionEmojis={reactionEmojis}
+                chatVolume={chatVolume}
+                destacada={destacada === m.id}
+                registrarRef={(el) => {
+                  if (el) balaoRefs.current.set(m.id, el);
+                  else balaoRefs.current.delete(m.id);
+                }}
+                nomeDe={nomeDe}
+                onOpenUser={onOpenUser}
+                onAmpliar={setAmpliada}
+                onApurarPoll={onApurarPoll}
+                onVotou={onVotou}
+                onResponder={responder}
+                onPularPara={pularPara}
+                onEditar={onEditar}
+                onApagar={apagar}
+                onReagir={reagir}
+                onRemoverDeVez={removerDeVez}
+              />
             );
           })
         )}
@@ -348,6 +423,26 @@ export function Chat({
 
       <div className="chat__composer">
         {erro && <div className="chat__erro">{erro}</div>}
+
+        {/* Fica ACIMA do anexo pendente: a ordem na tela é a ordem em que
+            as duas coisas entram na mensagem — primeiro a quem ela
+            responde, depois o que ela carrega. */}
+        {respondendo && (
+          <div className="chat__respondendo">
+            <IconResponder size={14} />
+            <span className="chat__respondendo-quem">{respondendo.author_name}</span>
+            <span className="chat__respondendo-texto">
+              {resumoDe(respondendo)}
+            </span>
+            <button
+              className="chat__pendente-x"
+              onClick={() => setRespondendo(null)}
+              title="Não responder mais"
+            >
+              <IconClose size={14} />
+            </button>
+          </div>
+        )}
 
         {(pendente || subindo) && (
           <div className="chat__pendente">
@@ -418,9 +513,16 @@ export function Chat({
             </button>
 
             <textarea
+              ref={inputRef}
               className="chat__input"
               rows={1}
-              placeholder={pendente ? 'Legenda (opcional)...' : 'Escreve aqui...'}
+              placeholder={
+                respondendo
+                  ? `Respondendo ${respondendo.author_name}...`
+                  : pendente
+                    ? 'Legenda (opcional)...'
+                    : 'Escreve aqui...'
+              }
               value={draft}
               maxLength={2000}
               onChange={(e) => setDraft(e.target.value)}
@@ -429,11 +531,354 @@ export function Chat({
                   e.preventDefault();
                   void send();
                 }
+                // Esc solta a resposta antes de limpar qualquer outra coisa:
+                // é o jeito de desistir sem tirar a mão do teclado.
+                if (e.key === 'Escape' && respondendo) {
+                  e.preventDefault();
+                  setRespondendo(null);
+                }
               }}
             />
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Como uma mensagem se resume numa linha só.
+ *
+ * Usado pela barra do composer. O card de citação do balão NÃO passa por
+ * aqui: o dele vem pronto do servidor (Message.reply_to.snippet), que é
+ * quem consegue resolver a original mesmo quando ela não está carregada
+ * nesta tela.
+ */
+function resumoDe(m: Message): string {
+  if (m.deleted) return 'mensagem removida';
+  if (m.body.trim()) return m.body;
+  if (m.poll) return m.poll.question;
+  if (m.attachments?.length) return m.attachments[0].name;
+  return 'mensagem';
+}
+
+interface BalaoProps {
+  m: Message;
+  seguida: boolean;
+  meId: string;
+  isAdmin: boolean;
+  reactionEmojis: string[];
+  chatVolume: number;
+  destacada: boolean;
+  registrarRef: (el: HTMLDivElement | null) => void;
+  nomeDe: (id: string) => string;
+  onOpenUser: (identity: string) => void;
+  onAmpliar: (a: Attachment) => void;
+  onApurarPoll: (poll: Poll) => void;
+  onVotou: (pollId: number) => void;
+  onResponder: (m: Message) => void;
+  onPularPara: (id: number) => void;
+  onEditar: (id: number, body: string) => Promise<void>;
+  onApagar: (id: number) => Promise<void>;
+  onReagir: (id: number, emoji: string) => Promise<void>;
+  onRemoverDeVez: (id: number) => Promise<void>;
+}
+
+function Balao({
+  m, seguida, meId, isAdmin, reactionEmojis, chatVolume, destacada,
+  registrarRef, nomeDe, onOpenUser, onAmpliar, onApurarPoll, onVotou,
+  onResponder, onPularPara, onEditar, onApagar, onReagir, onRemoverDeVez,
+}: BalaoProps) {
+  /** Aberta = a tirinha de emojis no lugar dos botões. */
+  const [reagindo, setReagindo] = useState(false);
+  /** Não-nulo = o corpo virou campo de edição, com este texto dentro. */
+  const [rascunho, setRascunho] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  /** Falha ao salvar. Fica DENTRO da caixa: é ali que a pessoa está olhando. */
+  const [erroEdicao, setErroEdicao] = useState<string | null>(null);
+  /**
+   * O botão de remover de vez já foi clicado uma vez e espera confirmação.
+   *
+   * A confirmação mora no próprio botão em vez de numa janela por cima: é
+   * uma ação irreversível, mas pequena e repetitiva (limpar várias lápides
+   * seguidas), e um modal a cada uma seria pior que o risco. Volta sozinho
+   * em 3s pra não ficar armado esperando um clique distraído.
+   */
+  const [confirmando, setConfirmando] = useState(false);
+  useEffect(() => {
+    if (!confirmando) return;
+    const t = window.setTimeout(() => setConfirmando(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [confirmando]);
+
+  const hora = timeFmt.format(m.created_at);
+  const meu = m.user_id === meId;
+  const podeApagar = meu || isAdmin;
+
+  const classes = [
+    'msg',
+    seguida ? 'msg--seguida' : '',
+    destacada ? 'msg--destacada' : '',
+    m.deleted ? 'msg--removida' : '',
+  ].filter(Boolean).join(' ');
+
+  const salvarEdicao = async () => {
+    if (rascunho === null || salvando) return;
+    const texto = rascunho.trim();
+    // Nada mudou: fecha sem gastar um round-trip nem um "(editado)".
+    if (texto === m.body.trim()) {
+      setRascunho(null);
+      return;
+    }
+    setSalvando(true);
+    setErroEdicao(null);
+    try {
+      await onEditar(m.id, texto);
+      setRascunho(null);
+    } catch (err) {
+      console.error(err);
+      // A caixa fica ABERTA de propósito: o texto que a pessoa escreveu
+      // continua ali pra ela tentar de novo. Fechar perderia a edição junto
+      // com o erro.
+      setErroEdicao(mensagemDeErro(err, 'Não consegui salvar. Tente de novo.'));
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  return (
+    <div
+      className={classes}
+      ref={registrarRef}
+      // Tirar o mouse fecha a tirinha de emojis. Sem isto ela ficaria aberta
+      // atrás de outra mensagem, já que a barra inteira some no hover.
+      onMouseLeave={() => setReagindo(false)}
+    >
+      {seguida ? (
+        // Segura a coluna da esquerda no lugar da foto e guarda o
+        // horário, que só aparece quando o mouse passa por cima.
+        <div className="msg__vinco">
+          <span
+            className="msg__time msg__time--vinco"
+            title={`${m.author_name} às ${hora}`}
+          >
+            {hora}
+          </span>
+        </div>
+      ) : (
+        <button
+          className="msg__avatar-btn"
+          onClick={() => onOpenUser(m.user_id)}
+          title={`Ver o perfil de ${m.author_name}`}
+        >
+          <Avatar
+            url={m.author_avatar}
+            name={m.author_name}
+            size={36}
+            className="msg__avatar"
+          />
+        </button>
+      )}
+
+      <div className="msg__body">
+        {/* A citação vem ANTES do cabeçalho, como um fio que sobe até a
+            original — é a leitura natural: primeiro a quem se responde,
+            depois quem está falando. */}
+        {m.reply_to && (
+          <button
+            className="msg__citacao"
+            onClick={() => onPularPara(m.reply_to!.id)}
+            title="Ir até a mensagem respondida"
+          >
+            <span className="msg__citacao-quem">{m.reply_to.author_name}</span>
+            <span className="msg__citacao-texto">{m.reply_to.snippet}</span>
+          </button>
+        )}
+
+        {!seguida && (
+          <div className="msg__head">
+            <button
+              className="msg__author msg__author--botao"
+              onClick={() => onOpenUser(m.user_id)}
+            >
+              {m.author_name}
+            </button>
+            <span className="msg__time">{hora}</span>
+          </div>
+        )}
+
+        {m.deleted ? (
+          <div className="msg__texto-removido">mensagem removida</div>
+        ) : rascunho !== null ? (
+          <div className="msg__edicao">
+            <textarea
+              className="chat__input"
+              rows={1}
+              autoFocus
+              value={rascunho}
+              maxLength={2000}
+              disabled={salvando}
+              onChange={(e) => setRascunho(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void salvarEdicao();
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setRascunho(null);
+                  setErroEdicao(null);
+                }
+              }}
+            />
+            <div className={erroEdicao ? 'msg__edicao-erro' : 'msg__edicao-dica'}>
+              {erroEdicao ?? 'Enter salva · Esc cancela'}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Texto puro via children do React — escapado automaticamente.
+                Nada de dangerouslySetInnerHTML aqui. */}
+            {m.body && (
+              <div className="msg__text">
+                {m.body}
+                {m.edited_at != null && (
+                  <span
+                    className="msg__editado"
+                    title={`Editada em ${dataHoraFmt.format(m.edited_at)}`}
+                  >
+                    (editado)
+                  </span>
+                )}
+              </div>
+            )}
+            {m.attachments?.map((a) => (
+              <Anexo
+                key={a.id}
+                anexo={a}
+                chatVolume={chatVolume}
+                onAmpliar={onAmpliar}
+              />
+            ))}
+            {m.poll && (
+              <Enquete
+                poll={m.poll}
+                meId={meId}
+                nomeDe={nomeDe}
+                onApurar={onApurarPoll}
+                onVotou={onVotou}
+              />
+            )}
+          </>
+        )}
+
+        {m.reactions && m.reactions.length > 0 && (
+          <div className="msg__reacoes">
+            {m.reactions.map((r) => {
+              const minha = r.users.includes(meId);
+              return (
+                <button
+                  key={r.emoji}
+                  className={`reacao${minha ? ' reacao--minha' : ''}`}
+                  onClick={() => void onReagir(m.id, r.emoji)}
+                  title={r.users.map(nomeDe).join(', ')}
+                >
+                  <span className="reacao__emoji">{r.emoji}</span>
+                  <span className="reacao__conta">{r.users.length}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Na lápide a barra tem uma coisa só: tirar o "mensagem removida" da
+          conversa. É o segundo estágio — o conteúdo já foi embora, e isto
+          apaga o registro. */}
+      {m.deleted && podeApagar && (
+        <div className="msg__acoes">
+          <button
+            className={`msg__remover${confirmando ? ' msg__remover--confirma' : ''}`}
+            onClick={() => {
+              if (!confirmando) { setConfirmando(true); return; }
+              setConfirmando(false);
+              void onRemoverDeVez(m.id);
+            }}
+            title={
+              confirmando
+                ? 'Some da conversa pra todo mundo, sem volta'
+                : 'Tirar da conversa de vez'
+            }
+          >
+            {confirmando ? 'confirmar?' : <IconLixeira size={14} />}
+          </button>
+        </div>
+      )}
+
+      {/* Durante a edição a barra some: os botões competiriam com o Enter
+          que salva. */}
+      {!m.deleted && rascunho === null && (
+        <div className="msg__acoes">
+          {reagindo ? (
+            <div className="msg__emojis">
+              {reactionEmojis.map((e) => (
+                <button
+                  key={e}
+                  className="msg__emoji"
+                  onClick={() => {
+                    setReagindo(false);
+                    void onReagir(m.id, e);
+                  }}
+                  title={`Reagir com ${e}`}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <>
+              {/* Sem lista de emojis não há o que abrir. Acontece quando o
+                  app já atualizou e o servidor ainda não: o /api/me antigo
+                  não manda reactionEmojis, e um botão que abre uma tirinha
+                  vazia é pior que botão nenhum. */}
+              {reactionEmojis.length > 0 && (
+                <button
+                  className="msg__acao"
+                  onClick={() => setReagindo(true)}
+                  title="Reagir"
+                >
+                  <IconReagir size={15} />
+                </button>
+              )}
+              <button
+                className="msg__acao"
+                onClick={() => onResponder(m)}
+                title="Responder"
+              >
+                <IconResponder size={15} />
+              </button>
+              {meu && (
+                <button
+                  className="msg__acao"
+                  onClick={() => setRascunho(m.body)}
+                  title="Editar"
+                >
+                  <IconLapis size={15} />
+                </button>
+              )}
+              {podeApagar && (
+                <button
+                  className="msg__acao msg__acao--perigo"
+                  onClick={() => void onApagar(m.id)}
+                  title={meu ? 'Apagar' : 'Apagar (admin)'}
+                >
+                  <IconLixeira size={15} />
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

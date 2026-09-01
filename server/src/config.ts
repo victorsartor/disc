@@ -35,6 +35,24 @@ export const config = {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean),
 
+  /**
+   * Quem pode apagar mensagem dos outros.
+   *
+   * Mesma forma do allowlist, e de propósito: é uma variável de ambiente, e
+   * não uma coluna em `users`. Admin aqui não é um papel que muda — é o dono
+   * do servidor. Uma coluna traria migração, uma tela pra promover alguém e
+   * um segundo lugar pra desincronizar, tudo pra representar uma lista que
+   * hoje tem um nome só.
+   *
+   * Quem está aqui NÃO precisa estar no ALLOWED_EMAILS: as duas listas são
+   * independentes, e um admin que não pode entrar seria só uma pegadinha.
+   * Confira as duas ao adicionar alguém.
+   */
+  admins: (process.env.ADMIN_EMAILS ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+
   dbPath,
 
   /**
@@ -85,6 +103,21 @@ export const MAX_POLL_OPTIONS = 6;
 
 /** Teto de um anexo. O cliente também barra antes de subir; aqui é a rede. */
 export const MAX_FILE_BYTES = 200 * 1024 * 1024;
+
+/**
+ * Os emojis que dá pra usar numa reação.
+ *
+ * Lista FECHADA, e o servidor recusa o que não estiver aqui. Um picker
+ * completo significaria aceitar qualquer string curta do cliente — e uma
+ * coluna que aceita qualquer coisa vira uma coluna com qualquer coisa
+ * dentro. Seis cobrem o que seis pessoas usam; a ordem é a que aparece na
+ * tirinha do hover.
+ */
+export const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'] as const;
+
+export function isValidReaction(emoji: string): boolean {
+  return (REACTION_EMOJIS as readonly string[]).includes(emoji);
+}
 
 /**
  * Teto do espaço TOTAL de anexos.

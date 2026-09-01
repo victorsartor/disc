@@ -131,7 +131,17 @@ async function apiFetch(path: string, init: RequestInit = {}): Promise<any> {
     win?.webContents.send('auth:changed', false);
     throw new Error('sessao expirada');
   }
-  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+  if (!res.ok) {
+    // O status vai no COMECO da mensagem, e num formato que da pra procurar.
+    //
+    // Propriedade de Error nao sobrevive a viagem pelo IPC - do outro lado
+    // chega so a string. Sem isto o renderer nao tem como distinguir "essa
+    // mensagem nao e sua" (403) de "essa rota nem existe no servidor" (404),
+    // e as duas viravam a mesma frase generica na tela. A 404 e a mais
+    // importante das duas: e o que acontece quando o app ja atualizou e o
+    // servidor nao, que e o estado normal por alguns minutos a cada versao.
+    throw new Error(`HTTP_${res.status} ${(await res.text()) || ''}`.trim());
+  }
   return res.json();
 }
 
@@ -388,7 +398,9 @@ ipcMain.handle('api:heartbeat', (_e, ativo: unknown) =>
   }));
 ipcMain.handle('api:set-status', (_e, status: unknown) =>
   apiFetch('/api/me/status', { method: 'PATCH', body: JSON.stringify({ status }) }));
-ipcMain.handle('api:send-message', (_e, body: string, attachmentId?: unknown, poll?: unknown) =>
+ipcMain.handle('api:send-message', (
+  _e, body: string, attachmentId?: unknown, poll?: unknown, replyToId?: unknown,
+) =>
   apiFetch('/api/messages', {
     method: 'POST',
     body: JSON.stringify({
@@ -399,7 +411,30 @@ ipcMain.handle('api:send-message', (_e, body: string, attachmentId?: unknown, po
       // Repassado cru: quem valida pergunta e opcoes e o servidor, e
       // duplicar a regra aqui so criaria duas versoes dela pra divergirem.
       poll: poll ?? undefined,
+      replyToId: typeof replyToId === 'number' ? replyToId : undefined,
     }),
+  }));
+
+// Editar, apagar e reagir. Os tres devolvem a mensagem inteira remontada
+// pelo servidor - ver o comentario em types.ts.
+ipcMain.handle('api:edit-message', (_e, id: unknown, body: unknown) =>
+  apiFetch(`/api/messages/${encodeURIComponent(String(id))}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ body: typeof body === 'string' ? body : '' }),
+  }));
+
+ipcMain.handle('api:delete-message', (_e, id: unknown) =>
+  apiFetch(`/api/messages/${encodeURIComponent(String(id))}`, { method: 'DELETE' }));
+
+// Segundo estagio: tira a lapide da conversa. So funciona depois do
+// api:delete-message - o servidor recusa mensagem que ainda esta viva.
+ipcMain.handle('api:purge-message', (_e, id: unknown) =>
+  apiFetch(`/api/messages/${encodeURIComponent(String(id))}/definitivo`, { method: 'DELETE' }));
+
+ipcMain.handle('api:react-message', (_e, id: unknown, emoji: unknown) =>
+  apiFetch(`/api/messages/${encodeURIComponent(String(id))}/reactions`, {
+    method: 'PUT',
+    body: JSON.stringify({ emoji: typeof emoji === 'string' ? emoji : '' }),
   }));
 // --- Isolamento de audio no Windows: o addon nativo ----------------------
 /**

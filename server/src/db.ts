@@ -93,6 +93,25 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_poll_votes_poll ON poll_votes(poll_id);
+
+  -- Reações. A CHAVE PRIMÁRIA COMPOSTA é o que impede a mesma pessoa reagir
+  -- duas vezes com o mesmo emoji na mesma mensagem — pelo mesmo motivo do
+  -- poll_votes: uma regra garantida pelo banco não tem como ser esquecida
+  -- num caminho de código novo. Ela também é o que faz o toggle funcionar
+  -- sem ler antes de escrever (ver toggleReaction).
+  --
+  -- O emoji é TEXT e não um índice numa tabela de emojis: a lista vive no
+  -- config.ts, é fechada, e o servidor valida contra ela na entrada. Uma
+  -- tabela de seis linhas imutáveis só traria um JOIN por reação.
+  CREATE TABLE IF NOT EXISTS message_reactions (
+    message_id INTEGER NOT NULL REFERENCES messages(id),
+    user_id    TEXT    NOT NULL REFERENCES users(id),
+    emoji      TEXT    NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id, emoji)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_reactions_message ON message_reactions(message_id);
 `);
 
 /**
@@ -102,10 +121,16 @@ db.exec(`
  * antigo nunca veria estes campos. Perguntamos ao pragma antes de alterar em
  * vez de engolir o erro do ALTER — engolir esconderia falha de verdade junto.
  */
-const userColumns = new Set(
-  (db.pragma('table_info(users)') as { name: string }[]).map((c) => c.name),
-);
-for (const [name, decl] of [
+function garantirColunas(tabela: string, colunas: readonly (readonly [string, string])[]): void {
+  const existentes = new Set(
+    (db.pragma(`table_info(${tabela})`) as { name: string }[]).map((c) => c.name),
+  );
+  for (const [name, decl] of colunas) {
+    if (!existentes.has(name)) db.exec(`ALTER TABLE ${tabela} ADD COLUMN ${name} ${decl}`);
+  }
+}
+
+garantirColunas('users', [
   ['banner_url', 'TEXT'],
   ['bio', 'TEXT'],
   ['status_text', 'TEXT'],
@@ -129,9 +154,23 @@ for (const [name, decl] of [
   // Enfeite de perfil que os OUTROS veem, ao contrário do tema (que é
   // preferência de máquina e nem chega aqui). Um dos ids de EFEITOS.
   ['profile_effect', "TEXT NOT NULL DEFAULT 'nenhum'"],
-] as const) {
-  if (!userColumns.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${decl}`);
-}
+] as const);
+
+garantirColunas('messages', [
+  // Quando foi editada. NULL = nunca foi, e é isso que decide o "(editado)".
+  ['edited_at', 'INTEGER'],
+  /**
+   * Quando foi apagada. NULL = viva.
+   *
+   * Lápide, não DELETE: a linha continua existindo porque outras apontam pra
+   * ela — uma resposta cita esta mensagem, e uma enquete é filha dela. Apagar
+   * de verdade deixaria a resposta apontando pro vazio, sem nada que a
+   * consertasse depois. Quem esvazia o conteúdo é o montarMensagens.
+   */
+  ['deleted_at', 'INTEGER'],
+  // A mensagem que esta responde. NULL = não é resposta.
+  ['reply_to_id', 'INTEGER REFERENCES messages(id)'],
+] as const);
 
 export interface User {
   id: string;
@@ -208,6 +247,33 @@ export interface Poll {
   options: PollOption[];
 }
 
+/**
+ * Uma reação, já agrupada por emoji.
+ *
+ * `users` traz os ids, e não só a contagem — mesma escolha do PollOption:
+ * são seis pessoas, e quem reagiu aparece no tooltip. É também o que deixa
+ * o cliente saber se VOCÊ reagiu sem uma segunda consulta.
+ */
+export interface Reaction {
+  emoji: string;
+  users: string[];
+}
+
+/**
+ * O pedacinho da mensagem que está sendo respondida.
+ *
+ * Recalculado a cada leitura, nunca congelado no envio: assim editar ou
+ * apagar a original reflete em toda resposta que aponta pra ela. Congelar o
+ * texto no momento do envio deixaria uma citação dizendo o que a mensagem
+ * NÃO diz mais — e sem nada que a corrigisse.
+ */
+export interface ReplyPreview {
+  id: number;
+  author_name: string;
+  /** Já resolvido: o corpo, a pergunta da enquete, "anexo" ou a lápide. */
+  snippet: string;
+}
+
 export interface MessageRow {
   id: number;
   body: string;
@@ -217,6 +283,12 @@ export interface MessageRow {
   author_avatar: string | null;
   attachments: Attachment[];
   poll: Poll | null;
+  reactions: Reaction[];
+  /** Quando foi editada, ou null. O cliente desenha "(editado)". */
+  edited_at: number | null;
+  /** Lápide: o conteúdo já vem vazio, e o cliente desenha "mensagem removida". */
+  deleted: boolean;
+  reply_to: ReplyPreview | null;
 }
 
 /** A enquete como ela chega pra ser criada, antes de existir no banco. */
@@ -240,6 +312,66 @@ interface VoteRow {
   user_id: string;
   option_index: number;
 }
+
+interface ReactionRow {
+  message_id: number;
+  user_id: string;
+  emoji: string;
+}
+
+/**
+ * A linha crua da mensagem, com a original da resposta pendurada.
+ *
+ * Os campos `reply_*` vêm do LEFT JOIN e são todos null quando a mensagem
+ * não responde ninguém. Quem os transforma em ReplyPreview é o
+ * resolverCitacao — aqui eles ainda são as colunas do banco.
+ */
+interface MensagemBruta {
+  id: number;
+  body: string;
+  created_at: number;
+  user_id: string;
+  edited_at: number | null;
+  deleted_at: number | null;
+  reply_to_id: number | null;
+  author_name: string;
+  author_avatar: string | null;
+  reply_deleted: number | null;
+  reply_body: string | null;
+  reply_author: string | null;
+  reply_question: string | null;
+  reply_tem_anexo: number | null;
+}
+
+/**
+ * A projeção de uma mensagem, escrita UMA vez.
+ *
+ * Fica em constante porque duas consultas a usam — a lista e a de uma
+ * mensagem só —, e elas precisam devolver exatamente as mesmas colunas. Uma
+ * projeção copiada é uma projeção que vai divergir na próxima coluna nova, e
+ * o sintoma seria a mensagem recém-enviada aparecer diferente da mesma
+ * mensagem três segundos depois.
+ *
+ * A pergunta da enquete entra por subconsulta porque uma mensagem de enquete
+ * tem `body` vazio: sem ela, responder a uma enquete citaria "anexo".
+ */
+const COLUNAS_MENSAGEM = `
+  m.id, m.body, m.created_at, m.user_id,
+  m.edited_at, m.deleted_at, m.reply_to_id,
+  u.name AS author_name, u.avatar_url AS author_avatar,
+  r.deleted_at AS reply_deleted,
+  r.body       AS reply_body,
+  ru.name      AS reply_author,
+  (SELECT question FROM polls WHERE message_id = r.id) AS reply_question,
+  EXISTS (SELECT 1 FROM attachments WHERE message_id = r.id) AS reply_tem_anexo
+`;
+
+const JOINS_MENSAGEM = `
+  FROM messages m
+  JOIN users u ON u.id = m.user_id
+  LEFT JOIN messages r  ON r.id = m.reply_to_id
+  LEFT JOIN users    ru ON ru.id = r.user_id
+`;
 
 const stmts = {
   findByEmail: db.prepare<[string]>('SELECT * FROM users WHERE email = ?'),
@@ -279,16 +411,67 @@ const stmts = {
   findImage: db.prepare<[string]>('SELECT mime, bytes FROM images WHERE id = ?'),
   deleteImage: db.prepare<[string]>('DELETE FROM images WHERE id = ?'),
   insertMessage: db.prepare(
-    'INSERT INTO messages (user_id, body, created_at) VALUES (?, ?, ?)',
+    'INSERT INTO messages (user_id, body, created_at, reply_to_id) VALUES (?, ?, ?, ?)',
   ),
-  recentMessages: db.prepare<[number]>(`
-    SELECT m.id, m.body, m.created_at, m.user_id,
-           u.name AS author_name, u.avatar_url AS author_avatar
-    FROM messages m
-    JOIN users u ON u.id = m.user_id
-    ORDER BY m.id DESC
-    LIMIT ?
+  recentMessages: db.prepare<[number]>(
+    `SELECT ${COLUNAS_MENSAGEM} ${JOINS_MENSAGEM} ORDER BY m.id DESC LIMIT ?`,
+  ),
+  // A MESMA projeção da lista, para uma mensagem só. É o que garante que a
+  // mensagem devolvida no POST (o caminho rápido do data channel) seja igual
+  // à que o polling traz três segundos depois — duas montagens diferentes
+  // seriam duas chances de discordarem.
+  messageById: db.prepare<[number]>(
+    `SELECT ${COLUNAS_MENSAGEM} ${JOINS_MENSAGEM} WHERE m.id = ?`,
+  ),
+  // Só o que decide permissão e estado, sem os JOINs da projeção completa.
+  messageOwner: db.prepare<[number]>(
+    'SELECT id, user_id, deleted_at FROM messages WHERE id = ?',
+  ),
+  updateMessageBody: db.prepare<[string, number, number]>(
+    'UPDATE messages SET body = ?, edited_at = ? WHERE id = ?',
+  ),
+  tombstoneMessage: db.prepare<[number, number]>(
+    'UPDATE messages SET deleted_at = ? WHERE id = ?',
+  ),
+  attachmentsOfMessage: db.prepare<[number]>(
+    'SELECT * FROM attachments WHERE message_id = ?',
+  ),
+
+  // --- Reações -----------------------------------------------------------
+  // Mesmo desenho em lote dos anexos e das enquetes: uma consulta só para as
+  // reações de todas as mensagens que o recentMessages devolve.
+  reactionsForRecent: db.prepare<[number]>(`
+    SELECT message_id, user_id, emoji FROM message_reactions
+     WHERE message_id IN (SELECT id FROM messages ORDER BY id DESC LIMIT ?)
+     ORDER BY created_at ASC
   `),
+  reactionsOfMessage: db.prepare<[number]>(
+    'SELECT message_id, user_id, emoji FROM message_reactions WHERE message_id = ? ORDER BY created_at ASC',
+  ),
+  deleteReaction: db.prepare<[number, string, string]>(
+    'DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?',
+  ),
+  insertReaction: db.prepare(
+    'INSERT INTO message_reactions (message_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)',
+  ),
+
+  // --- Remover de vez ----------------------------------------------------
+  // As chaves estrangeiras estao DECLARADAS mas nao sao aplicadas: o SQLite
+  // so as respeita com `PRAGMA foreign_keys = ON`, que nao ligamos. Ou seja,
+  // apagar a linha da mensagem nao falharia — ela so deixaria voto, enquete
+  // e reacao pendurados num id que nao existe mais, pra sempre. Por isso a
+  // limpeza e explicita, e nas dependencias antes da mensagem.
+  deletePollVotesOfMessage: db.prepare<[number]>(
+    'DELETE FROM poll_votes WHERE poll_id IN (SELECT id FROM polls WHERE message_id = ?)',
+  ),
+  deletePollsOfMessage: db.prepare<[number]>('DELETE FROM polls WHERE message_id = ?'),
+  deleteReactionsOfMessage: db.prepare<[number]>(
+    'DELETE FROM message_reactions WHERE message_id = ?',
+  ),
+  clearRepliesTo: db.prepare<[number]>(
+    'UPDATE messages SET reply_to_id = NULL WHERE reply_to_id = ?',
+  ),
+  deleteMessageRow: db.prepare<[number]>('DELETE FROM messages WHERE id = ?'),
 
   // --- Anexos ------------------------------------------------------------
   insertAttachment: db.prepare(`
@@ -532,9 +715,10 @@ const inserirMensagem = db.transaction(
     body: string,
     attachmentId: string | null,
     poll: NovaPoll | null,
+    replyToId: number | null,
   ): number => {
     const agora = Date.now();
-    const info = stmts.insertMessage.run(userId, body, agora);
+    const info = stmts.insertMessage.run(userId, body, agora, replyToId);
     const id = Number(info.lastInsertRowid);
     if (attachmentId) {
       const r = stmts.attachToMessage.run(id, attachmentId, userId);
@@ -561,12 +745,136 @@ export function saveMessage(
   body: string,
   attachmentId: string | null = null,
   poll: NovaPoll | null = null,
+  replyToId: number | null = null,
 ): number {
-  return inserirMensagem(userId, body, attachmentId, poll);
+  return inserirMensagem(userId, body, attachmentId, poll, replyToId);
 }
 
+/** Quanto da mensagem original cabe no card de citação. */
+const LIMITE_CITACAO = 80;
+
+function encurtar(texto: string): string {
+  const limpo = texto.replace(/\s+/g, ' ').trim();
+  return limpo.length > LIMITE_CITACAO ? `${limpo.slice(0, LIMITE_CITACAO)}…` : limpo;
+}
+
+/**
+ * O card de citação, resolvido a partir das colunas do LEFT JOIN.
+ *
+ * A ordem das perguntas é a ordem em que elas importam: uma mensagem apagada
+ * não mostra o que dizia, mesmo que o texto ainda esteja na linha (é
+ * justamente por isso que a lápide não apaga o registro). Depois vem o
+ * corpo; depois a pergunta da enquete, que é o texto de uma mensagem cujo
+ * body é vazio; e só então o anexo, que é o que sobra.
+ */
+function resolverCitacao(b: MensagemBruta): ReplyPreview | null {
+  if (b.reply_to_id === null || b.reply_author === null) return null;
+
+  const snippet = b.reply_deleted !== null
+    ? 'mensagem removida'
+    : b.reply_body?.trim()
+      ? encurtar(b.reply_body)
+      : b.reply_question?.trim()
+        ? encurtar(b.reply_question)
+        : b.reply_tem_anexo
+          ? 'anexo'
+          : 'mensagem';
+
+  return { id: b.reply_to_id, author_name: b.reply_author, snippet };
+}
+
+function agruparReacoes(linhas: ReactionRow[]): Map<number, Reaction[]> {
+  const porMensagem = new Map<number, Reaction[]>();
+  for (const r of linhas) {
+    let lista = porMensagem.get(r.message_id);
+    if (!lista) porMensagem.set(r.message_id, (lista = []));
+    // Agrupa por emoji preservando a ordem de chegada: o primeiro emoji usado
+    // fica à esquerda, e a tirinha não dança a cada reação nova.
+    const existente = lista.find((x) => x.emoji === r.emoji);
+    if (existente) existente.users.push(r.user_id);
+    else lista.push({ emoji: r.emoji, users: [r.user_id] });
+  }
+  return porMensagem;
+}
+
+/** Os lados de uma mensagem, buscados em lote por quem chama. */
+interface Lados {
+  attachments: Map<number, Attachment[]>;
+  polls: Map<number, Poll>;
+  reactions: Map<number, Reaction[]>;
+}
+
+/**
+ * A linha crua vira o que o cliente recebe.
+ *
+ * É AQUI que a lápide esvazia a mensagem, e num lugar só: o texto, os
+ * anexos, a enquete e as reações somem todos juntos. Espalhar essa decisão
+ * pelas rotas deixaria cada caminho novo com uma chance de esquecer um dos
+ * quatro — e o esquecido seria a foto de uma mensagem apagada continuando na
+ * tela de todo mundo.
+ */
+function montarMensagem(b: MensagemBruta, lados: Lados): MessageRow {
+  const base = {
+    id: b.id,
+    created_at: b.created_at,
+    user_id: b.user_id,
+    author_name: b.author_name,
+    author_avatar: b.author_avatar,
+  };
+
+  if (b.deleted_at !== null) {
+    return {
+      ...base,
+      body: '',
+      attachments: [],
+      poll: null,
+      reactions: [],
+      edited_at: null,
+      deleted: true,
+      reply_to: null,
+    };
+  }
+
+  return {
+    ...base,
+    body: b.body,
+    attachments: lados.attachments.get(b.id) ?? [],
+    poll: lados.polls.get(b.id) ?? null,
+    reactions: lados.reactions.get(b.id) ?? [],
+    edited_at: b.edited_at,
+    deleted: false,
+    reply_to: resolverCitacao(b),
+  };
+}
+
+/**
+ * Uma mensagem só, montada exatamente como a lista a montaria.
+ *
+ * Serve a resposta do POST, que é o que viaja pelo data channel. Chamar a
+ * mesma montagem é o que impede o balão recém-enviado de aparecer diferente
+ * do mesmo balão relido três segundos depois pelo polling.
+ */
+export function messageById(id: number): MessageRow | undefined {
+  const bruta = stmts.messageById.get(id) as MensagemBruta | undefined;
+  if (!bruta) return undefined;
+
+  const anexos = stmts.attachmentsOfMessage.all(id) as AttachmentRecord[];
+  const poll = pollForMessage(id);
+
+  return montarMensagem(bruta, {
+    attachments: new Map(anexos.length > 0 ? [[id, anexos.map(paraAnexo)]] : []),
+    polls: new Map(poll ? [[id, poll]] : []),
+    reactions: agruparReacoes(stmts.reactionsOfMessage.all(id) as ReactionRow[]),
+  });
+}
+
+/** Só os campos que o cliente vê — o registro tem user_id e message_id a mais. */
+const paraAnexo = (a: AttachmentRecord): Attachment => ({
+  id: a.id, name: a.name, mime: a.mime, size: a.size, kind: a.kind,
+});
+
 export function recentMessages(limit = 100): MessageRow[] {
-  const linhas = (stmts.recentMessages.all(limit) as MessageRow[]).reverse();
+  const brutas = (stmts.recentMessages.all(limit) as MensagemBruta[]).reverse();
 
   // Os anexos vêm numa segunda consulta e são distribuídos aqui. Um JOIN
   // duplicaria a mensagem por anexo, e desduplicar depois custa mais que
@@ -575,9 +883,8 @@ export function recentMessages(limit = 100): MessageRow[] {
   for (const a of stmts.attachmentsForRecent.all(limit) as AttachmentRecord[]) {
     if (a.message_id === null) continue;
     const lista = porMensagem.get(a.message_id);
-    const item: Attachment = { id: a.id, name: a.name, mime: a.mime, size: a.size, kind: a.kind };
-    if (lista) lista.push(item);
-    else porMensagem.set(a.message_id, [item]);
+    if (lista) lista.push(paraAnexo(a));
+    else porMensagem.set(a.message_id, [paraAnexo(a)]);
   }
 
   // As enquetes seguem o mesmo caminho, por duas consultas em lote: as
@@ -598,12 +905,105 @@ export function recentMessages(limit = 100): MessageRow[] {
     }
   }
 
-  for (const m of linhas) {
-    m.attachments = porMensagem.get(m.id) ?? [];
-    m.poll = porMensagemPoll.get(m.id) ?? null;
-  }
-  return linhas;
+  // As reações também em lote, pelo mesmo motivo. Sem chave para pular
+  // quando não há nenhuma: ao contrário das enquetes, reação é barata e
+  // frequente, e a consulta volta vazia sem custo.
+  const porMensagemReacao = agruparReacoes(
+    stmts.reactionsForRecent.all(limit) as ReactionRow[],
+  );
+
+  const lados: Lados = {
+    attachments: porMensagem,
+    polls: porMensagemPoll,
+    reactions: porMensagemReacao,
+  };
+  return brutas.map((b) => montarMensagem(b, lados));
 }
+
+// --- Editar, apagar e reagir ---------------------------------------------
+/** O mínimo pra decidir permissão: de quem é, e se já foi apagada. */
+export interface MessageOwner {
+  id: number;
+  user_id: string;
+  deleted_at: number | null;
+}
+
+export function messageOwner(id: number): MessageOwner | undefined {
+  return stmts.messageOwner.get(id) as MessageOwner | undefined;
+}
+
+export function editMessage(id: number, body: string): void {
+  stmts.updateMessageBody.run(body, Date.now(), id);
+}
+
+/**
+ * Vira lápide e entrega os anexos que ficaram sem dono.
+ *
+ * Devolve os ids em vez de apagar os bytes aqui porque quem sabe onde os
+ * bytes moram é o arquivos.ts — o banco guarda só metadado (ver o comentário
+ * do filesDir). Quem chama passa a lista pra lá.
+ *
+ * Sem isso os bytes ficariam órfãos de um jeito que NADA recolhe: a faxina
+ * procura anexo com message_id NULL, e o desta mensagem continua apontando
+ * pra ela. Um vídeo de 200 MB de uma mensagem apagada moraria no disco pra
+ * sempre.
+ */
+export const deleteMessage = db.transaction((id: number): string[] => {
+  stmts.tombstoneMessage.run(Date.now(), id);
+  const anexos = stmts.attachmentsOfMessage.all(id) as AttachmentRecord[];
+  return anexos.map((a) => a.id);
+});
+
+/**
+ * Some com a mensagem de vez: a linha vai embora, e tudo que pendurava nela.
+ *
+ * O segundo estágio de apagar. O primeiro (lápide) existe porque outras
+ * linhas apontam pra esta; este só roda depois, quando a pessoa decide que
+ * nem o "mensagem removida" deve continuar na conversa.
+ *
+ * A ordem importa: as dependências saem ANTES da mensagem. E o
+ * `clearRepliesTo` é o que impede o pior caso — uma resposta com
+ * `reply_to_id` apontando pra um id que não existe mais. O LEFT JOIN da
+ * projeção até aguenta (a citação vira null e some da tela, que é o
+ * comportamento combinado), mas deixar a referência pendurada seria confiar
+ * nisso pra sempre, inclusive numa consulta futura que não use LEFT JOIN.
+ *
+ * Devolve os anexos que sobraram, pra quem chama passar ao arquivos.ts —
+ * mesma divisão do deleteMessage, porque quem sabe onde os bytes moram é
+ * ele. Normalmente é lista vazia: a lápide já levou os bytes. É cinto e
+ * suspensório pra uma linha que tenha virado lápide por um caminho anterior
+ * a esta versão.
+ */
+export const purgeMessage = db.transaction((id: number): string[] => {
+  const anexos = stmts.attachmentsOfMessage.all(id) as AttachmentRecord[];
+
+  stmts.deletePollVotesOfMessage.run(id);
+  stmts.deletePollsOfMessage.run(id);
+  stmts.deleteReactionsOfMessage.run(id);
+  stmts.clearRepliesTo.run(id);
+  stmts.deleteMessageRow.run(id);
+
+  return anexos.map((a) => a.id);
+});
+
+/**
+ * Liga ou desliga uma reação, sem ler antes de escrever.
+ *
+ * O DELETE volta com `changes` 0 quando não havia nada pra tirar — e é
+ * exatamente aí que a reação entra. Ler primeiro e decidir depois abriria
+ * uma janela entre a leitura e a escrita; aqui as duas metades são a mesma
+ * transação, e a chave composta recusaria a duplicata de qualquer jeito.
+ *
+ * Devolve true quando a reação passou a existir.
+ */
+export const toggleReaction = db.transaction(
+  (messageId: number, userId: string, emoji: string): boolean => {
+    const r = stmts.deleteReaction.run(messageId, userId, emoji);
+    if (r.changes > 0) return false;
+    stmts.insertReaction.run(messageId, userId, emoji, Date.now());
+    return true;
+  },
+);
 
 /**
  * Presença — os dois relógios.

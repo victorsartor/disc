@@ -3,17 +3,19 @@ import { AccessToken } from 'livekit-server-sdk';
 import {
   config, CHANNELS, isValidChannel, MAX_MESSAGE_LENGTH,
   MAX_POLL_QUESTION, MAX_POLL_OPTION, MIN_POLL_OPTIONS, MAX_POLL_OPTIONS,
+  REACTION_EMOJIS, isValidReaction,
 } from './config.js';
 import { registerAuthRoutes, userFromRequest } from './auth.js';
 import {
   recentMessages, saveMessage, touchPresence, setStatus, findUserById,
-  findAttachment, findPoll, pollForMessage, setVote,
-  type User, type NovaPoll,
+  findPoll, setVote, messageById, messageOwner, editMessage, deleteMessage,
+  toggleReaction, purgeMessage,
+  type User, type NovaPoll, type MessageRow,
 } from './db.js';
 import { rateLimit } from './ratelimit.js';
 import { presence, usersPresence, statusEfetivo } from './presence.js';
 import { registerProfileRoutes } from './profile.js';
-import { registerFileRoutes, paraCliente } from './arquivos.js';
+import { registerFileRoutes, paraCliente, apagarAnexo } from './arquivos.js';
 import { iniciarContagemDeTempo } from './tempo.js';
 
 const app = Fastify({
@@ -35,6 +37,28 @@ async function requireUser(req: any, reply: any): Promise<User | null> {
   return user;
 }
 
+/**
+ * Quem pode apagar mensagem dos outros. Ver config.admins.
+ *
+ * A comparação é por e-mail em minúsculas dos dois lados: o config já
+ * normaliza a lista, e o e-mail no banco entra normalizado pelo callback do
+ * Google (ver auth.ts). Um admin que não funciona por causa de uma
+ * maiúscula seria o tipo de bug que ninguém procura no lugar certo.
+ */
+function isAdmin(user: User): boolean {
+  return config.admins.includes(user.email.toLowerCase());
+}
+
+/**
+ * A mensagem com as URLs dos anexos prontas.
+ *
+ * Único lugar que faz essa passagem, e por isso todas as rotas que devolvem
+ * mensagem passam por aqui — a lista, o envio, a edição e a reação.
+ */
+function paraOCliente(m: MessageRow) {
+  return { ...m, attachments: m.attachments.map(paraCliente) };
+}
+
 app.get('/health', async () => ({ ok: true }));
 
 app.get('/api/me', async (req, reply) => {
@@ -47,6 +71,12 @@ app.get('/api/me', async (req, reply) => {
     avatarUrl: user.avatar_url,
     channels: CHANNELS,
     livekitUrl: config.livekit.url,
+    // Só pra tela decidir se mostra o botão de apagar a mensagem dos outros.
+    // Quem MANDA continua sendo o servidor, que confere de novo na rota — o
+    // cliente esconder um botão não é controle de acesso.
+    isAdmin: isAdmin(user),
+    // A tirinha de reações vem do servidor pra não existirem duas listas.
+    reactionEmojis: REACTION_EMOJIS,
   };
 });
 
@@ -203,12 +233,7 @@ function lerPoll(bruto: unknown): { poll: NovaPoll } | { erro: string } {
 app.get('/api/messages', async (req, reply) => {
   const user = await requireUser(req, reply);
   if (!user) return;
-  return {
-    messages: recentMessages(100).map((m) => ({
-      ...m,
-      attachments: m.attachments.map(paraCliente),
-    })),
-  };
+  return { messages: recentMessages(100).map(paraOCliente) };
 });
 
 app.post('/api/messages', async (req, reply) => {
@@ -219,16 +244,31 @@ app.post('/api/messages', async (req, reply) => {
     return reply.code(429).send({ error: 'devagar aí' });
   }
 
-  const { body, attachmentId, poll } = (req.body ?? {}) as {
+  const { body, attachmentId, poll, replyToId } = (req.body ?? {}) as {
     body?: unknown;
     attachmentId?: unknown;
     poll?: unknown;
+    replyToId?: unknown;
   };
   if (typeof body !== 'string') {
     return reply.code(400).send({ error: 'corpo inválido' });
   }
   if (attachmentId !== undefined && typeof attachmentId !== 'string') {
     return reply.code(400).send({ error: 'anexo inválido' });
+  }
+
+  // A original tem que existir E estar viva: responder a uma lápide é
+  // pedir um card de citação que já nasce dizendo "mensagem removida".
+  let respondendo: number | null = null;
+  if (replyToId !== undefined && replyToId !== null) {
+    if (!Number.isInteger(replyToId)) {
+      return reply.code(400).send({ error: 'resposta inválida' });
+    }
+    const alvo = messageOwner(replyToId as number);
+    if (!alvo || alvo.deleted_at !== null) {
+      return reply.code(400).send({ error: 'a mensagem respondida não existe mais' });
+    }
+    respondendo = replyToId as number;
   }
 
   let novaPoll: NovaPoll | null = null;
@@ -254,31 +294,160 @@ app.post('/api/messages', async (req, reply) => {
   try {
     // Guardamos o texto cru. A sanitização acontece na renderização,
     // que é o único lugar onde XSS pode virar execução.
-    id = saveMessage(user.id, text, attachmentId ?? null, novaPoll);
+    id = saveMessage(user.id, text, attachmentId ?? null, novaPoll, respondendo);
   } catch {
     return reply.code(400).send({ error: 'anexo inválido' });
   }
 
-  const anexo = attachmentId ? findAttachment(attachmentId) : undefined;
+  // Relida do banco inteira, pela MESMA montagem que a lista usa. Antes esta
+  // resposta era montada à mão aqui, campo a campo — e cada campo novo
+  // (reação, citação, "editado") era mais uma chance de o balão que acabou
+  // de sair sair diferente do mesmo balão relido três segundos depois.
+  return { message: paraOCliente(messageById(id)!) };
+});
 
-  return {
-    message: {
-      id,
-      body: text,
-      created_at: Date.now(),
-      user_id: user.id,
-      author_name: user.name,
-      author_avatar: user.avatar_url,
-      // Um app numa versão anterior a esta ignora o campo e desenha só o
-      // body — que numa foto sem legenda é vazio. Balão em branco até a
-      // pessoa atualizar; o electron-updater fecha essa janela sozinho.
-      attachments: anexo ? [paraCliente(anexo)] : [],
-      // Relido do banco em vez de devolvido do que chegou: é o insert que
-      // decide o id da enquete, e sem ele o app de quem mandou não teria
-      // como votar na própria enquete até o polling trazer a mensagem.
-      poll: novaPoll ? pollForMessage(id) ?? null : null,
-    },
-  };
+/**
+ * Editar. Só o autor, e só mensagem viva.
+ *
+ * Admin não entra aqui de propósito: apagar o que não presta é moderação,
+ * reescrever a fala de outra pessoa é outra coisa. Ninguém edita o texto de
+ * ninguém.
+ */
+app.patch('/api/messages/:id', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return;
+
+  if (!rateLimit(`edit:${user.id}`, 20, 10_000)) {
+    return reply.code(429).send({ error: 'devagar aí' });
+  }
+
+  const id = Number((req.params as { id: string }).id);
+  const alvo = messageOwner(id);
+  if (!alvo) return reply.code(404).send({ error: 'mensagem inexistente' });
+  if (alvo.deleted_at !== null) {
+    return reply.code(410).send({ error: 'essa mensagem foi apagada' });
+  }
+  if (alvo.user_id !== user.id) {
+    return reply.code(403).send({ error: 'essa mensagem não é sua' });
+  }
+
+  const { body } = (req.body ?? {}) as { body?: unknown };
+  if (typeof body !== 'string') {
+    return reply.code(400).send({ error: 'corpo inválido' });
+  }
+  const text = body.trim();
+  if (text.length > MAX_MESSAGE_LENGTH) {
+    return reply.code(400).send({ error: 'mensagem muito longa' });
+  }
+
+  // Esvaziar não é apagar: apagar tem rota própria, e deixar o texto sumir
+  // por edição daria uma segunda porta pro mesmo lugar, sem lápide e sem a
+  // limpeza dos bytes do anexo. Quem quer apagar, apaga.
+  const atual = messageById(id)!;
+  if (!text && atual.attachments.length === 0 && !atual.poll) {
+    return reply.code(400).send({ error: 'mensagem vazia — use apagar' });
+  }
+
+  editMessage(id, text);
+  return { message: paraOCliente(messageById(id)!) };
+});
+
+/**
+ * Apagar. O autor, ou um admin.
+ *
+ * Vira lápide em vez de sumir com a linha: uma resposta pode estar apontando
+ * pra ela, e uma enquete é filha dela. Os bytes do anexo, esses somem de
+ * verdade — ver deleteMessage no db.ts.
+ */
+app.delete('/api/messages/:id', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return;
+
+  if (!rateLimit(`del:${user.id}`, 20, 10_000)) {
+    return reply.code(429).send({ error: 'devagar aí' });
+  }
+
+  const id = Number((req.params as { id: string }).id);
+  const alvo = messageOwner(id);
+  if (!alvo) return reply.code(404).send({ error: 'mensagem inexistente' });
+  if (alvo.user_id !== user.id && !isAdmin(user)) {
+    return reply.code(403).send({ error: 'essa mensagem não é sua' });
+  }
+
+  // Já apagada: responde o estado atual em vez de 410. Dois cliques rápidos
+  // no mesmo botão não são um erro que valha uma mensagem vermelha na tela.
+  if (alvo.deleted_at === null) {
+    for (const anexoId of deleteMessage(id)) apagarAnexo(anexoId);
+  }
+
+  return { message: paraOCliente(messageById(id)!) };
+});
+
+/**
+ * Segundo estágio: tira a lápide da conversa de vez.
+ *
+ * Só funciona em mensagem que JÁ é lápide, e isso é a regra que sustenta o
+ * resto: obriga a passar pelo DELETE normal antes, que é quem apaga os bytes
+ * do anexo. Um atalho daqui pra uma mensagem viva pularia essa limpeza e
+ * deixaria o arquivo no disco sem dono.
+ *
+ * Não devolve mensagem — não há mais mensagem. Devolve o id, que é o que o
+ * cliente precisa pra tirar da lista.
+ */
+app.delete('/api/messages/:id/definitivo', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return;
+
+  if (!rateLimit(`purge:${user.id}`, 20, 10_000)) {
+    return reply.code(429).send({ error: 'devagar aí' });
+  }
+
+  const id = Number((req.params as { id: string }).id);
+  const alvo = messageOwner(id);
+  // Já não existe: responde sucesso. Dois cliques na confirmação, ou duas
+  // pessoas limpando a mesma lápide, não são erro — o fim pretendido é o
+  // mesmo, e o cliente só quer saber que pode tirar da tela.
+  if (!alvo) return { removed: true, id };
+
+  if (alvo.user_id !== user.id && !isAdmin(user)) {
+    return reply.code(403).send({ error: 'essa mensagem não é sua' });
+  }
+  if (alvo.deleted_at === null) {
+    return reply.code(409).send({ error: 'apague a mensagem antes de removê-la de vez' });
+  }
+
+  for (const anexoId of purgeMessage(id)) apagarAnexo(anexoId);
+  return { removed: true, id };
+});
+
+/**
+ * Liga/desliga uma reação sua. Idempotente por emoji: mandar duas vezes
+ * volta ao estado inicial, que é o que um botão de alternar faz.
+ */
+app.put('/api/messages/:id/reactions', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return;
+
+  if (!rateLimit(`react:${user.id}`, 60, 10_000)) {
+    return reply.code(429).send({ error: 'devagar aí' });
+  }
+
+  const id = Number((req.params as { id: string }).id);
+  const alvo = messageOwner(id);
+  if (!alvo) return reply.code(404).send({ error: 'mensagem inexistente' });
+  if (alvo.deleted_at !== null) {
+    return reply.code(410).send({ error: 'essa mensagem foi apagada' });
+  }
+
+  const { emoji } = (req.body ?? {}) as { emoji?: unknown };
+  // A lista fechada é o que impede a coluna de virar depósito de qualquer
+  // string que um cliente resolva mandar. Ver REACTION_EMOJIS.
+  if (typeof emoji !== 'string' || !isValidReaction(emoji)) {
+    return reply.code(400).send({ error: 'emoji inválido' });
+  }
+
+  toggleReaction(id, user.id, emoji);
+  return { message: paraOCliente(messageById(id)!) };
 });
 
 /**

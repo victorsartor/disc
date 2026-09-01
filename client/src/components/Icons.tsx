@@ -202,3 +202,44 @@ export const IconBaixar = ({ size = 16 }: Props) => (
     <path d="M12 15V3" />
   </svg>
 );
+
+/* ── Ações da mensagem (0.31) ─────────────────────────────────────────── */
+
+/** Carinha sorrindo com um "+": abre a tirinha de reações. */
+export const IconReagir = ({ size = 16 }: Props) => (
+  <svg {...base(size)}>
+    <path d="M20.9 13a9 9 0 1 1-7.9-7.9" />
+    <path d="M9 9h.01" />
+    <path d="M15 9h.01" />
+    <path d="M8.5 14.5a4.5 4.5 0 0 0 6 .8" />
+    <path d="M19 3v5" />
+    <path d="M16.5 5.5h5" />
+  </svg>
+);
+
+/** Seta curvando pra esquerda: responder. */
+export const IconResponder = ({ size = 16 }: Props) => (
+  <svg {...base(size)}>
+    <path d="m9 15-5-5 5-5" />
+    <path d="M4 10h10a6 6 0 0 1 6 6v3" />
+  </svg>
+);
+
+/** Lápis: editar a própria mensagem. */
+export const IconLapis = ({ size = 16 }: Props) => (
+  <svg {...base(size)}>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </svg>
+);
+
+/** Lixeira: apagar. */
+export const IconLixeira = ({ size = 16 }: Props) => (
+  <svg {...base(size)}>
+    <path d="M3 6h18" />
+    <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+  </svg>
+);

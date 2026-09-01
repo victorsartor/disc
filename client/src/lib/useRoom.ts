@@ -269,6 +269,8 @@ function readAvatar(p: Participant): string | null {
 export function useRoom(
   onChatMessage: (m: Message) => void,
   onVoteChanged: (pollId: number) => void,
+  onMessageChanged: (m: Message) => void,
+  onMessageRemoved: (id: number) => void,
 ) {
   const roomRef = useRef<Room | null>(null);
   const settingsRef = useRef<Settings | null>(null);
@@ -276,6 +278,10 @@ export function useRoom(
   chatCbRef.current = onChatMessage;
   const voteCbRef = useRef(onVoteChanged);
   voteCbRef.current = onVoteChanged;
+  const changedCbRef = useRef(onMessageChanged);
+  changedCbRef.current = onMessageChanged;
+  const removedCbRef = useRef(onMessageRemoved);
+  removedCbRef.current = onMessageRemoved;
   // Refs porque os handlers de evento da sala capturam o valor do momento
   // em que a sala foi criada e ficariam com estado velho.
   const deafenedRef = useRef(false);
@@ -631,6 +637,20 @@ export function useRoom(
               const msg = JSON.parse(decoder.decode(payload));
               if (msg?.kind === 'chat' && msg.message) {
                 chatCbRef.current(msg.message);
+              } else if (msg?.kind === 'msg-changed' && msg.message) {
+                // Editada, apagada ou reagida. A mensagem INTEIRA viaja, ao
+                // contrario do voto: quem reage ja recebeu do servidor o
+                // objeto remontado, entao repassa-lo custa o mesmo que
+                // avisar - e evita um round-trip por reacao em cada app.
+                //
+                // A contagem nao e somada de um lado nem do outro: os dois
+                // recebem o mesmo objeto do servidor, e o polling de 3s
+                // reconcilia quem perdeu o aviso.
+                changedCbRef.current(msg.message);
+              } else if (msg?.kind === 'msg-removed' && typeof msg.id === 'number') {
+                // Removida de vez. So o id viaja: nao ha mais mensagem, e o
+                // id e tudo que o outro lado precisa pra tirar da lista.
+                removedCbRef.current(msg.id);
               } else if (msg?.kind === 'vote' && typeof msg.pollId === 'number') {
                 // So o AVISO viaja, nunca a apuracao. Quem recebe pergunta
                 // ao servidor quanto ficou — somar um no numero que ja
@@ -1110,6 +1130,40 @@ export function useRoom(
   }, []);
 
   /**
+   * Retransmite uma mensagem que MUDOU — editada, apagada ou reagida.
+   *
+   * Caminho rapido, igual ao broadcastChat: alcanca so quem esta na mesma
+   * sala de voz. Quem esta fora recebe pelo polling de 3s, que ja traz o
+   * estado novo junto das mensagens.
+   */
+  const broadcastMessageChanged = useCallback(async (message: Message) => {
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      await room.localParticipant.publishData(
+        encoder.encode(JSON.stringify({ kind: 'msg-changed', message })),
+        { reliable: true },
+      );
+    } catch {
+      /* sem sala ou sem permissao: o polling cobre */
+    }
+  }, []);
+
+  /** Avisa a sala que uma mensagem saiu da conversa de vez. */
+  const broadcastMessageRemoved = useCallback(async (id: number) => {
+    const room = roomRef.current;
+    if (!room) return;
+    try {
+      await room.localParticipant.publishData(
+        encoder.encode(JSON.stringify({ kind: 'msg-removed', id })),
+        { reliable: true },
+      );
+    } catch {
+      /* sem sala ou sem permissao: o polling cobre */
+    }
+  }, []);
+
+  /**
    * Avisa a sala que uma enquete mudou. So o id viaja.
    *
    * Mesma divisao do chat: isto e o caminho RAPIDO, pra quem esta na mesma
@@ -1289,6 +1343,7 @@ export function useRoom(
     micOn: micLive, micWanted, pttDown, deafened, sharing, error, micLevel, ping,
     localScreen, shareStartedAt, assistindo, toggleAssistir,
     connect, disconnect, toggleMic, toggleDeafen, setPeerVolume, setScreenVolume,
-    startShare, stopShare, broadcastChat, broadcastVote, updateSettings,
+    startShare, stopShare, broadcastChat, broadcastVote, broadcastMessageChanged,
+    broadcastMessageRemoved, updateSettings,
   };
 }
