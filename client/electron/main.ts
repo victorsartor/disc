@@ -4,6 +4,7 @@ import {
 } from 'electron';
 import { join, dirname, basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import {
   readFileSync, writeFileSync, rmSync, existsSync,
   createReadStream, createWriteStream, statSync,
@@ -24,6 +25,10 @@ import {
 import {
   init as initUpdater, currentState as updateState, skip as skipUpdate,
 } from './updater.js';
+import {
+  isolar as isolarAudio, liberar as liberarAudio, limparSobras as limparAudio,
+  temPactl,
+} from './audio-linux.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +43,22 @@ if (process.platform === 'linux') {
   // pelo caminho Wayland. Metade em cada lado e o que faz o portal abrir,
   // a pessoa escolher a tela, e a lista voltar vazia mesmo assim.
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+
+  // Assina os nossos streams de audio com um nome que da pra reconhecer.
+  //
+  // O isolamento de audio (audio-linux.ts) precisa separar "som da Disneia"
+  // de "som do jogo" na lista do PulseAudio, e o que ele tem pra decidir e
+  // o application.name. Sem isto o Chromium se apresenta como "Chromium",
+  // que e o mesmo nome do navegador da pessoa — e nao da pra distinguir.
+  //
+  // TEM QUE SER AQUI, antes do app ficar pronto: o libpulse le esta
+  // variavel quando abre a conexao, e quem abre e o servico de audio do
+  // Chromium, que herda o ambiente de agora. Depois nao adianta mais.
+  //
+  // De quebra, e assim que a Disneia aparece no controle de volume do
+  // sistema — antes era "Chromium" ali tambem.
+  const antes = process.env.PULSE_PROP ? `${process.env.PULSE_PROP} ` : '';
+  process.env.PULSE_PROP = `${antes}application.name=Disneia`;
 }
 
 // Identidade da janela pro Windows, e tem que bater com o appId do
@@ -52,6 +73,9 @@ const SERVER_URL = process.env.VITE_SERVER_URL ?? 'http://localhost:3000';
 const PROTOCOL = 'disc';
 
 let win: BrowserWindow | null = null;
+
+/** Trava do before-quit: sem ela o quit() de dentro dele voltaria pra ele. */
+let saindo = false;
 
 // --- Sessao: fica no processo main, cifrada pelo keychain do SO. ---------
 // O renderer NUNCA ve este token. Ele so recebe tokens de sala do LiveKit,
@@ -272,6 +296,16 @@ if (!app.requestSingleInstanceLock()) {
       win?.webContents.send('overlay:enabled', enabled);
     });
 
+    // Sobra de audio de uma sessao que morreu no meio (queda, kill, falta de
+    // energia). Sem isto a pessoa reabre o app e nao tem som nenhum, porque
+    // a saida padrao ficou apontando pra um sink virtual que ninguem mais
+    // alimenta — e nada na tela explicaria o porque. Ver audio-linux.ts.
+    if (process.platform === 'linux') {
+      void limparAudio().then((n) => {
+        if (n > 0) console.log(`[audio-linux] ${n} modulo(s) de uma sessao anterior removido(s)`);
+      });
+    }
+
     // Inicializacao fria no Windows: o deep link chega pelo argv
     handleDeepLink(process.argv.find((a) => a.startsWith(`${PROTOCOL}://`)));
   });
@@ -283,6 +317,16 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     shutdownPtt();
+  });
+
+  // Fechar o app no meio de uma transmissao nao pode deixar o desvio de
+  // audio montado. O will-quit e sincrono e nao espera promessa, entao o
+  // desmonte vai aqui, que roda antes e permite adiar a saida.
+  app.on('before-quit', (e) => {
+    if (process.platform !== 'linux' || saindo) return;
+    saindo = true;
+    e.preventDefault();
+    void liberarAudio().finally(() => app.quit());
   });
 }
 
@@ -357,6 +401,125 @@ ipcMain.handle('api:send-message', (_e, body: string, attachmentId?: unknown, po
       poll: poll ?? undefined,
     }),
   }));
+// --- Isolamento de audio no Windows: o addon nativo ----------------------
+/**
+ * O addon que captura o som do sistema sem a nossa arvore de processos.
+ *
+ * Carregado sob demanda e guardado: e um binario nativo, e um require que
+ * falha nao pode derrubar o app inteiro na abertura. Falta dele = sem
+ * isolamento, que e o comportamento de antes desta versao.
+ *
+ * Dois caminhos porque em dev ele mora no repositorio e empacotado ele vai
+ * pros recursos do app (ver extraResources no package.json). Nao da pra
+ * usar o mesmo: o asar nao carrega binario nativo de dentro.
+ */
+interface AudioWinAddon {
+  start(pid: number, taxa: number, canais: number, cb: (b: Buffer) => void): void;
+  stop(): string | undefined;
+  ativa(): boolean;
+}
+
+let audioWin: AudioWinAddon | null = null;
+let audioWinTentado = false;
+
+function carregarAudioWin(): AudioWinAddon | null {
+  if (audioWinTentado) return audioWin;
+  audioWinTentado = true;
+  if (process.platform !== 'win32') return null;
+
+  const candidatos = [
+    join(process.resourcesPath ?? '', 'audio_win.node'),
+    join(__dirname, '../native/audio-win/build/Release/audio_win.node'),
+  ];
+
+  for (const caminho of candidatos) {
+    try {
+      if (!existsSync(caminho)) continue;
+      // createRequire: este arquivo e ESM, e binario nativo so carrega pelo
+      // require do CommonJS.
+      audioWin = createRequire(import.meta.url)(caminho) as AudioWinAddon;
+      return audioWin;
+    } catch (err) {
+      console.error('[audio-win] nao consegui carregar', caminho, err);
+    }
+  }
+  return null;
+}
+
+// --- IPC: isolamento de audio --------------------------------------------
+/**
+ * Monta o desvio e devolve a DESCRICAO do monitor a capturar.
+ *
+ * Devolve null quando nao da (outro sistema, sem pactl, algo falhou). O
+ * renderer trata null caindo no caminho de antes — transmitir com eco
+ * ainda e melhor que nao transmitir.
+ */
+ipcMain.handle('audio:isolar', async () => {
+  if (process.platform !== 'linux') return null;
+  return isolarAudio();
+});
+
+ipcMain.handle('audio:liberar', async () => {
+  if (process.platform !== 'linux') return;
+  await liberarAudio();
+});
+
+/**
+ * O isolamento e possivel nesta maquina? A tela usa pra explicar o porque.
+ *
+ * As duas metades desta versao respondem por aqui, e por caminhos bem
+ * diferentes: no Linux basta o pactl responder; no Windows depende do addon
+ * nativo ter sido compilado e empacotado junto.
+ */
+ipcMain.handle('audio:disponivel', async () => {
+  if (process.platform === 'linux') return temPactl();
+  if (process.platform === 'win32') return carregarAudioWin() !== null;
+  return false;
+});
+
+/**
+ * Comeca a captura isolada do Windows e passa os quadros pro renderer.
+ *
+ * Devolve uma mensagem de erro (string) quando nao rola, ou undefined
+ * quando comecou. O renderer trata erro caindo no caminho de antes.
+ */
+ipcMain.handle('audio:iniciar', async (_e, taxa: unknown, canais: unknown) => {
+  if (process.platform !== 'win32') return 'so no Windows';
+  const addon = carregarAudioWin();
+  if (!addon) return 'o componente de audio nao esta disponivel nesta instalacao';
+
+  const destino = win;
+  if (!destino) return 'sem janela pra receber o audio';
+
+  try {
+    addon.start(
+      process.pid,
+      Number(taxa) || 48000,
+      Number(canais) || 2,
+      (quadros: Buffer) => {
+        // isDestroyed: a janela pode fechar no meio de uma transmissao, e a
+        // thread de captura so descobre isso no proximo pedido de parada.
+        if (destino.isDestroyed()) return;
+        destino.webContents.send('audio:quadros', quadros);
+      },
+    );
+    return undefined;
+  } catch (err) {
+    return (err as Error).message || 'nao consegui iniciar a captura';
+  }
+});
+
+ipcMain.handle('audio:parar', async () => {
+  if (process.platform !== 'win32') return;
+  const addon = carregarAudioWin();
+  if (!addon) return;
+  try {
+    addon.stop();
+  } catch {
+    /* ja estava parado */
+  }
+});
+
 ipcMain.handle('api:poll', (_e, id: unknown) =>
   apiFetch(`/api/polls/${encodeURIComponent(String(id))}`));
 ipcMain.handle('api:poll-vote', (_e, id: unknown, options: unknown) =>

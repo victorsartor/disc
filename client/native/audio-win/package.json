@@ -1,0 +1,16 @@
+{
+  "name": "disneia-audio-win",
+  "version": "0.30.0",
+  "private": true,
+  "description": "Captura o som do sistema excluindo a arvore de processos da Disneia (WASAPI process loopback).",
+  "os": ["win32"],
+  "scripts": {
+    "build": "node-gyp rebuild --target=33.4.11 --arch=x64 --dist-url=https://electronjs.org/headers"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.3.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^11.0.0"
+  }
+}

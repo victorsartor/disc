@@ -50,6 +50,31 @@ if (Test-Path (Join-Path $destino "$nome Setup $versao.exe")) {
 # o feed de atualizacao no app-update.yml. Sem ela o app aponta pra localhost.
 $env:VITE_SERVER_URL = $dominio
 
+# --- O componente nativo de audio ----------------------------------------
+# Compilado ANTES do empacotamento porque o electron-builder so copia o
+# .node pros recursos do app (ver extraResources) se ele ja existir. Sem
+# isto o instalador sai sem o componente e o isolamento de audio fica
+# indisponivel no Windows - em silencio, que e o pior jeito.
+#
+# Nao entra no npmRebuild do electron-builder de proposito: ele esta
+# desligado no projeto, e este addon precisa do ABI do Electron, nao do
+# Node do sistema.
+Write-Host "Compilando o componente de audio..." -ForegroundColor Cyan
+Push-Location (Join-Path $raiz "client\native\audio-win")
+try {
+    if (-not (Test-Path "node_modules")) {
+        npm install --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw "as dependencias do componente de audio falharam" }
+    }
+    npm run build
+    if ($LASTEXITCODE -ne 0) { throw "o componente de audio nao compilou" }
+} finally {
+    Pop-Location
+}
+
+$addon = Join-Path $raiz "client\native\audio-win\build\Release\audio_win.node"
+if (-not (Test-Path $addon)) { throw "o componente de audio nao apareceu em $addon" }
+
 Write-Host "Compilando..." -ForegroundColor Cyan
 Push-Location (Join-Path $raiz "client")
 try {

@@ -186,6 +186,25 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
     ...monitores.map((d) => ({ value: d.deviceId, label: d.label })),
   ];
 
+  /**
+   * Dá pra isolar o áudio nesta máquina?
+   *
+   * Perguntado ao processo main em vez de deduzido do sistema operacional:
+   * ser Linux não basta, é preciso que o `pactl` responda. Numa máquina sem
+   * ele o interruptor apareceria ligado e não faria nada.
+   */
+  const [isolamentoDisponivel, setIsolamentoDisponivel] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    void window.disc.audio
+      .disponivel()
+      .then((v) => vivo && setIsolamentoDisponivel(v))
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
   return (
     <div className="modal" onClick={onClose}>
       <div className="modal__box modal__box--narrow" onClick={(e) => e.stopPropagation()}>
@@ -390,42 +409,87 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
             </div>
           </section>
 
-          {/* Só no Linux: no Windows o som da tela vem junto com a captura,
-              e não há nada pra escolher aqui. */}
-          {window.disc.platform === 'linux' && (
+          {/* Nos dois sistemas, por caminhos diferentes — só o macOS fica de
+              fora, onde nada disso existe. */}
+          {window.disc.platform !== 'darwin' && (
             <section className="settings__group">
               <h3 className="settings__title">Som ao compartilhar tela</h3>
 
-              <p className="settings__hint">
-                No Linux o som não vem junto com a tela — ele é gravado à parte,
-                de um &quot;monitor&quot;, que é uma escuta do que sai pela sua
-                caixa de som.
-              </p>
+              {window.disc.platform === 'linux' && (
+                <p className="settings__hint">
+                  No Linux o som não vem junto com a tela — ele é gravado à parte,
+                  de um &quot;monitor&quot;, que é uma escuta do que sai pela sua
+                  caixa de som.
+                </p>
+              )}
 
-              <div className="settings__row">
-                <span className="settings__label">Gravar de</span>
-                <Select
-                  label="Som ao compartilhar tela"
-                  value={settings.screenAudioDeviceId ?? ''}
-                  options={monitorOptions}
-                  onChange={(v) => void onPatch({ screenAudioDeviceId: v || null })}
+              <label className="settings__row">
+                <span className="settings__label">Tirar a Disneia do som transmitido</span>
+                <input
+                  type="checkbox"
+                  className="settings__check"
+                  checked={settings.isolarAudioNaTela}
+                  disabled={!isolamentoDisponivel}
+                  onChange={(e) => void onPatch({ isolarAudioNaTela: e.target.checked })}
                 />
-              </div>
+              </label>
 
-              {monitores.length === 0 ? (
-                <p className="settings__hint settings__hint--warn">
-                  Nenhum monitor apareceu. Costuma ser o PipeWire não estar
-                  expondo a escuta da saída — sem isso, só dá pra compartilhar
-                  sem som por aqui.
+              {isolamentoDisponivel ? (
+                <p className="settings__hint">
+                  {window.disc.platform === 'linux'
+                    ? `Ligado, o jogo passa a tocar num destino separado enquanto
+                       você transmite, e é dele que o som sai pra sala — a voz das
+                       pessoas fica de fora. Você continua ouvindo tudo normal, e
+                       quando a transmissão acaba o áudio volta como estava.`
+                    : `Ligado, o som que vai pra sala é gravado direto do Windows
+                       já sem a Disneia dentro — a voz das pessoas fica de fora e
+                       quem te assiste para de se ouvir de volta. Nada muda no que
+                       você escuta.`}
                 </p>
               ) : (
                 <p className="settings__hint settings__hint--warn">
-                  Atenção ao eco: o monitor grava TUDO que sai pela sua caixa,
-                  e a voz das outras pessoas também sai por ela. Do jeito
-                  simples, quem te ouve vai se ouvir de volta. Pra evitar,
-                  mande a Disneia pra uma saída de áudio diferente da do jogo
-                  em Configurações do sistema → Áudio → Aplicativos.
+                  {window.disc.platform === 'linux'
+                    ? `Não deu pra falar com o servidor de som desta máquina
+                       (o pactl não respondeu), então o isolamento fica
+                       indisponível e o som vai pelo caminho de sempre.`
+                    : `O componente de áudio não veio nesta instalação, então o
+                       isolamento fica indisponível e o som da tela vai do jeito
+                       antigo — com a voz da chamada junto.`}
                 </p>
+              )}
+
+              {/* O seletor de monitor é só do Linux: no Windows o som da tela
+                  vem junto com a captura e não há de onde escolher. Aqui ele
+                  é o caminho de reserva, pra quando o isolamento está
+                  desligado ou falha na hora. */}
+              {window.disc.platform === 'linux' && (
+                <>
+                  <div className="settings__row">
+                    <span className="settings__label">
+                      {settings.isolarAudioNaTela ? 'Se não der, gravar de' : 'Gravar de'}
+                    </span>
+                    <Select
+                      label="Som ao compartilhar tela"
+                      value={settings.screenAudioDeviceId ?? ''}
+                      options={monitorOptions}
+                      onChange={(v) => void onPatch({ screenAudioDeviceId: v || null })}
+                    />
+                  </div>
+
+                  {monitores.length === 0 ? (
+                    <p className="settings__hint settings__hint--warn">
+                      Nenhum monitor apareceu. Costuma ser o PipeWire não estar
+                      expondo a escuta da saída — sem isso, só dá pra compartilhar
+                      sem som por aqui.
+                    </p>
+                  ) : !settings.isolarAudioNaTela ? (
+                    <p className="settings__hint settings__hint--warn">
+                      Atenção ao eco: o monitor grava TUDO que sai pela sua caixa,
+                      e a voz das outras pessoas também sai por ela. Do jeito
+                      simples, quem te ouve vai se ouvir de volta.
+                    </p>
+                  ) : null}
+                </>
               )}
             </section>
           )}

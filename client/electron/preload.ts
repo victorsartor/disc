@@ -40,6 +40,36 @@ const api = {
     vote: (id: number, options: number[]) => ipcRenderer.invoke('api:poll-vote', id, options),
   },
 
+  audio: {
+    // Linux: orquestra o servidor de som por fora.
+    isolar: () => ipcRenderer.invoke('audio:isolar'),
+    liberar: () => ipcRenderer.invoke('audio:liberar'),
+    disponivel: () => ipcRenderer.invoke('audio:disponivel'),
+    // Windows: o addon nativo entrega quadros PCM, que viram faixa aqui.
+    iniciar: (taxa: number, canais: number) =>
+      ipcRenderer.invoke('audio:iniciar', taxa, canais),
+    parar: () => ipcRenderer.invoke('audio:parar'),
+    onQuadros: (cb: (amostras: Float32Array) => void) => {
+      const h = (_e: unknown, buf: Uint8Array) => {
+        // Float32Array exige deslocamento multiplo de 4, e um Buffer que
+        // atravessa o IPC pode chegar como VISTA de um bloco maior, com
+        // deslocamento qualquer. Nesse caso a construcao direta lanca
+        // RangeError - em producao, no meio de uma transmissao.
+        //
+        // Alem do alinhamento, so vale a pena seguir adiante com um buffer
+        // que seja SO nosso: o lado de la transfere a posse pro worklet, e
+        // transferir uma vista arrastaria o bloco inteiro junto.
+        const proprio =
+          buf.byteOffset === 0 && buf.byteLength === buf.buffer.byteLength
+            ? buf
+            : new Uint8Array(buf); // copia, ja alinhada e do tamanho certo
+        cb(new Float32Array(proprio.buffer, 0, proprio.byteLength / 4));
+      };
+      ipcRenderer.on('audio:quadros', h);
+      return () => ipcRenderer.off('audio:quadros', h);
+    },
+  },
+
   arquivos: {
     enviar: (caminho: string) => ipcRenderer.invoke('api:upload-file', caminho),
     enviarImagem: (bytes: Uint8Array, nome: string, mime: string) =>

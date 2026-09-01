@@ -17,6 +17,7 @@ import {
   setEffectsVolume,
 } from './sounds';
 import { Mic } from './mic';
+import { abrirAudioIsolado } from './audio-win';
 
 export interface Peer {
   identity: string;
@@ -128,6 +129,57 @@ export const MAX_ASSISTINDO = 2;
  * subtrai o que ja esta tocando (que aqui e justamente o sinal que
  * queremos), e ganho automatico faz a musica respirar junto com os tiros.
  */
+/**
+ * O som do sistema JA SEM a Disneia dentro.
+ *
+ * Pede ao processo main pra montar o desvio (ver electron/audio-linux.ts) e
+ * captura o monitor do sink virtual que ele cria. O que sai dali tem o
+ * jogo e nao tem a chamada — e por isso quem assiste para de se ouvir.
+ *
+ * Devolve null quando nao rolou, e o chamador cai no caminho de antes.
+ * Transmitir com eco e pior que sem, mas e muito melhor que nao transmitir.
+ */
+async function somIsolado(): Promise<MediaStreamTrack | null> {
+  const descricao = await window.disc.audio.isolar().catch(() => null);
+  if (!descricao) return null;
+
+  const id = await acharMonitor(descricao);
+  if (!id) {
+    // O desvio subiu mas o Chromium nao achou o monitor. Desmonta: deixar
+    // a saida padrao mexida sem ninguem capturando o resultado e o pior dos
+    // dois mundos — a pessoa perde som e nao ganha isolamento.
+    await window.disc.audio.liberar().catch(() => {});
+    return null;
+  }
+  return somDoSistema(id);
+}
+
+/**
+ * Acha o monitor do sink virtual na lista de dispositivos do Chromium.
+ *
+ * Pela DESCRICAO, e nao pelo nome interno do PulseAudio: o
+ * enumerateDevices so entrega `label`, e e nele que a descricao aparece. O
+ * texto tem que bater com o DESCRICAO_CAPTURA do audio-linux.ts.
+ *
+ * Com tentativas porque o sink acabou de nascer e a lista do Chromium nao
+ * atualiza na mesma hora — ela chega por um evento que vem depois.
+ */
+async function acharMonitor(descricao: string): Promise<string | null> {
+  for (let i = 0; i < 12; i++) {
+    try {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const achado = devs.find(
+        (d) => d.kind === 'audioinput' && d.label.includes(descricao),
+      );
+      if (achado) return achado.deviceId;
+    } catch {
+      /* lista indisponivel por um instante: tenta de novo */
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
+}
+
 async function somDoSistema(deviceId: string | null): Promise<MediaStreamTrack | null> {
   if (!deviceId) return null;
   try {
@@ -239,6 +291,14 @@ export function useRoom(
    * nao este instante. Ver announceState.
    */
   const sharingSinceRef = useRef<number | null>(null);
+  /**
+   * Como desmontar o isolamento de audio do Windows, quando ele subiu.
+   *
+   * Ref, e nao estado: quem precisa disto e o stopShare, e uma re-renderiza
+   * cao no meio de uma transmissao nao pode trocar a funcao que desliga a
+   * captura nativa.
+   */
+  const pararIsolamentoRef = useRef<(() => Promise<void>) | null>(null);
 
   /**
    * identity -> quando a transmissao daquela pessoa comecou, convertido pro
@@ -871,6 +931,17 @@ export function useRoom(
     setLocalScreen(null);
     sharingSinceRef.current = null;
     setShareStartedAt(null);
+
+    // Desmonta o isolamento de audio, nos dois sistemas. Chamar sempre e
+    // mais simples - e mais seguro - que lembrar se ele chegou a subir
+    // nesta transmissao: os dois lados sao inofensivos sem par.
+    await window.disc.audio.liberar().catch(() => {});
+    if (pararIsolamentoRef.current) {
+      const parar = pararIsolamentoRef.current;
+      pararIsolamentoRef.current = null;
+      await parar().catch(() => {});
+    }
+
     // Avisa que parou: sem isto, o cronometro so sumiria da tela dos outros
     // quando a faixa caisse, e o anuncio seguinte ainda diria que voce esta
     // no ar ha meia hora.
@@ -899,7 +970,13 @@ export function useRoom(
         audio: false,
       });
 
-      const som = await somDoSistema(settingsRef.current?.screenAudioDeviceId ?? null);
+      // Primeiro o caminho isolado; se ele nao rolar, o de sempre. A ordem
+      // importa: o isolado monta um desvio no servidor de som, e so faz
+      // sentido tentar antes de ja ter uma faixa na mao.
+      const isolar = settingsRef.current?.isolarAudioNaTela !== false;
+      const som =
+        (isolar ? await somIsolado() : null) ??
+        (await somDoSistema(settingsRef.current?.screenAudioDeviceId ?? null));
       if (som) stream.addTrack(som);
       return stream;
     }
@@ -915,6 +992,27 @@ export function useRoom(
         maxFrameRate: 60,
       },
     } as unknown as MediaTrackConstraints;
+
+    // Caminho isolado do Windows, PRIMEIRO. O `chromeMediaSource: 'desktop'`
+    // logo abaixo e o loopback do sistema INTEIRO - a voz da chamada entra
+    // nele, e e justamente disso que esta versao existe pra escapar. Aqui o
+    // video vem sozinho e o som vem do addon nativo, ja sem a Disneia.
+    if (settingsRef.current?.isolarAudioNaTela !== false) {
+      const isolado = await abrirAudioIsolado();
+      if (isolado) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+          stream.addTrack(isolado.faixa);
+          pararIsolamentoRef.current = isolado.parar;
+          return stream;
+        } catch (err) {
+          // O video falhou depois do audio ja estar de pe: desmonta, senao
+          // a captura nativa fica rodando sem ninguem ouvindo.
+          await isolado.parar();
+          throw err;
+        }
+      }
+    }
 
     try {
       return await navigator.mediaDevices.getUserMedia({

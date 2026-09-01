@@ -208,6 +208,15 @@ export interface Settings {
    * microfone. null = compartilhar so o video.
    */
   screenAudioDeviceId: string | null;
+  /**
+   * Tirar a Disneia do som transmitido, no Linux.
+   *
+   * Ligado, o app monta um desvio no servidor de som na hora de
+   * compartilhar: tudo passa a tocar num destino virtual — menos a
+   * Disneia — e é o monitor DESSE destino que vai pra transmissão. Quem
+   * assiste para de se ouvir de volta.
+   */
+  isolarAudioNaTela: boolean;
   overlayEnabled: boolean;
   overlayX: number | null;
   overlayY: number | null;
@@ -278,6 +287,35 @@ export interface DiscApi {
      * Lista vazia desmarca. A resposta já vem com a apuração nova.
      */
     vote(id: number, options: number[]): Promise<{ poll: Poll }>;
+  };
+  /**
+   * Isolamento do som da Disneia na transmissão. Só Linux.
+   *
+   * Sem isso, o monitor que o app grava pega TUDO que sai pela caixa — a
+   * voz das pessoas junto — e quem assiste se ouve de volta.
+   */
+  audio: {
+    /**
+     * Monta o desvio e devolve a DESCRIÇÃO do dispositivo a capturar, ou
+     * null quando não deu. Null não é erro: é o caminho de antes, com eco.
+     */
+    isolar(): Promise<string | null>;
+    liberar(): Promise<void>;
+    /**
+     * Dá pra isolar nesta máquina?
+     *
+     * As duas metades respondem por caminhos diferentes: no Linux, se o
+     * `pactl` responde; no Windows, se o componente nativo foi empacotado.
+     */
+    disponivel(): Promise<boolean>;
+    /**
+     * Windows: começa a captura isolada. Devolve a mensagem de erro, ou
+     * undefined quando começou. A taxa é a do AudioContext de quem chama.
+     */
+    iniciar(taxa: number, canais: number): Promise<string | undefined>;
+    parar(): Promise<void>;
+    /** Windows: os quadros PCM chegando. Devolve como desinscrever. */
+    onQuadros(cb: (amostras: Float32Array) => void): () => void;
   };
   arquivos: {
     /**

@@ -38,6 +38,16 @@ export interface Settings {
   chatVolume: number;
   /** Monitor do PipeWire de onde tirar o som da tela no Linux. */
   screenAudioDeviceId: string | null;
+  /**
+   * Tirar a Disneia do som transmitido, no Linux. Ver audio-linux.ts.
+   *
+   * Ligado por padrao: sem ele quem assiste se ouve de volta, e essa e uma
+   * falha que aparece pra TODO MUNDO na chamada, nao so pra quem transmite.
+   * Da pra desligar porque ele mexe na saida padrao do servidor de som, e
+   * isso e o tipo de coisa que a pessoa tem direito de recusar na propria
+   * maquina.
+   */
+  isolarAudioNaTela: boolean;
   overlayEnabled: boolean;
   overlayX: number | null;
   overlayY: number | null;
@@ -81,6 +91,7 @@ const DEFAULTS: Settings = {
   effectsVolume: 100,
   chatVolume: 100,
   screenAudioDeviceId: null,
+  isolarAudioNaTela: true,
   overlayEnabled: true,
   overlayX: null,
   overlayY: null,
@@ -158,7 +169,7 @@ const ALLOWED_KEYS = new Set<keyof Settings>([
   'speakerDeviceId', 'micSensitivity', 'noiseSuppression',
   'echoCancellation', 'autoGainControl', 'volumes', 'screenVolumes',
   'voiceVolume', 'effectsVolume', 'chatVolume',
-  'screenAudioDeviceId',
+  'screenAudioDeviceId', 'isolarAudioNaTela',
   'overlayEnabled', 'overlayX', 'overlayY', 'theme',
   'themeBg', 'themeBar', 'themeSymbol',
 ]);

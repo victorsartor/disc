@@ -1,7 +1,7 @@
 {
   "name": "disneia-client",
   "private": true,
-  "version": "0.29.0",
+  "version": "0.30.0",
   "description": "Disneia",
   "author": "Victor",
   "type": "module",
@@ -63,7 +63,13 @@
       "node_modules/node-gyp-build/**/*"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "extraResources": [
+        {
+          "from": "native/audio-win/build/Release/audio_win.node",
+          "to": "audio_win.node"
+        }
+      ]
     },
     "linux": {
       "target": "AppImage",

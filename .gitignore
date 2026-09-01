@@ -36,6 +36,11 @@ release/
 # sem isto um AppImage de 100 MB fica esperando pra entrar num commit.
 release-linux/
 .vite/
+# O componente nativo de áudio do Windows: a FONTE entra no histórico, o
+# binário não. Ele é recompilado pelo publicar.ps1 antes de empacotar, e
+# só serve pro ABI exato do Electron da vez — versionar o .obj e o .node
+# só traria conflito binário em cada build.
+client/native/*/build/
 
 # Sistema
 .DS_Store
