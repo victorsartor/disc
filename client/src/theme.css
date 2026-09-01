@@ -1531,6 +1531,15 @@ textarea {
   gap: 10px;
 }
 
+/* Encostada a esquerda, discreta: serve pra conferir qual build esta
+   rodando na hora de testar, sem competir com o botao de fechar. */
+.settings__versao {
+  margin-right: auto;
+  align-self: center;
+  font-size: 12px;
+  color: var(--lavender);
+}
+
 .source {
   border: 2px solid transparent;
   border-radius: var(--radius-md);

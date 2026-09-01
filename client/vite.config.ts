@@ -12,6 +12,17 @@ const preloadOut = {
 
 export default defineConfig({
   build: {
+    // O worklet de audio PRECISA virar arquivo, nunca data: URI.
+    //
+    // Abaixo do assetsInlineLimit (4 kB) o Vite embute o asset como
+    // `data:text/javascript`, e a CSP do index.html (`script-src 'self'`)
+    // recusa data: exatamente como recusava o blob: que existia antes.
+    // Nos dois casos o addModule falha SO EM PRODUCAO, o isolamento cai no
+    // loopback do sistema inteiro e quem assiste volta a se ouvir - foi o
+    // bug da 0.30.0. Como arquivo ele fica em ./assets, mesma origem do
+    // documento, e passa no 'self'.
+    assetsInlineLimit: (arquivo: string) =>
+      arquivo.endsWith('.worklet.js') ? false : undefined,
     rollupOptions: {
       input: {
         index: resolve(__dirname, 'index.html'),

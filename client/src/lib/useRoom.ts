@@ -999,19 +999,26 @@ export function useRoom(
     // video vem sozinho e o som vem do addon nativo, ja sem a Disneia.
     if (settingsRef.current?.isolarAudioNaTela !== false) {
       const isolado = await abrirAudioIsolado();
-      if (isolado) {
+      if (isolado.ok) {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
-          stream.addTrack(isolado.faixa);
-          pararIsolamentoRef.current = isolado.parar;
+          stream.addTrack(isolado.captura.faixa);
+          pararIsolamentoRef.current = isolado.captura.parar;
           return stream;
         } catch (err) {
           // O video falhou depois do audio ja estar de pe: desmonta, senao
           // a captura nativa fica rodando sem ninguem ouvindo.
-          await isolado.parar();
+          await isolado.captura.parar();
           throw err;
         }
       }
+
+      // Daqui pra baixo e o loopback do sistema INTEIRO, com a voz da
+      // chamada dentro. Continuar e melhor que nao transmitir, mas passar
+      // batido nao e: com o toggle marcado, quem transmite acredita que
+      // esta isolado. Foi exatamente assim que a 0.30.0 saiu quebrada.
+      console.warn('isolamento indisponivel, transmitindo o sistema inteiro:', isolado.motivo);
+      setError('nao consegui tirar a Disneia do som - quem te assiste vai se ouvir de volta');
     }
 
     try {

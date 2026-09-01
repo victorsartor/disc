@@ -16,69 +16,7 @@
  * acontece com frequencia, e os dois se corrigem sozinhos.
  */
 
-/**
- * O worklet mora numa string, e nao num arquivo .js separado.
- *
- * addModule() precisa de uma URL, e um arquivo a parte teria que sobreviver
- * ao empacotamento do electron-builder no caminho certo. Como Blob, ele
- * viaja junto com o bundle e nao ha caminho pra errar.
- */
-const CODIGO_WORKLET = `
-class AnelDeAudio extends AudioWorkletProcessor {
-  constructor(opcoes) {
-    super();
-    const canais = opcoes.processorOptions.canais;
-    const quadros = opcoes.processorOptions.quadros;
-    this.canais = canais;
-    this.anel = new Float32Array(quadros * canais);
-    this.tamanho = this.anel.length;
-    this.escrita = 0;
-    this.leitura = 0;
-    this.disponivel = 0;
-    this.port.onmessage = (e) => this.escrever(e.data);
-  }
-
-  escrever(bloco) {
-    const n = bloco.length;
-    // Sobra: o consumidor ficou pra tras (aba escondida, maquina travando).
-    // Joga fora o mais VELHO em vez do mais novo - audio atrasado nao
-    // interessa a ninguem, e assim a latencia nao cresce pra sempre.
-    if (this.disponivel + n > this.tamanho) {
-      const excesso = this.disponivel + n - this.tamanho;
-      this.leitura = (this.leitura + excesso) % this.tamanho;
-      this.disponivel -= excesso;
-    }
-    for (let i = 0; i < n; i++) {
-      this.anel[this.escrita] = bloco[i];
-      this.escrita = (this.escrita + 1) % this.tamanho;
-    }
-    this.disponivel += n;
-  }
-
-  process(_entradas, saidas) {
-    const saida = saidas[0];
-    const quadros = saida[0].length;
-    const precisa = quadros * this.canais;
-
-    if (this.disponivel < precisa) {
-      // Falta: silencio. Melhor um vazio curto que um estouro de ritmo.
-      for (let c = 0; c < saida.length; c++) saida[c].fill(0);
-      return true;
-    }
-
-    for (let q = 0; q < quadros; q++) {
-      for (let c = 0; c < this.canais; c++) {
-        const amostra = this.anel[this.leitura];
-        this.leitura = (this.leitura + 1) % this.tamanho;
-        if (c < saida.length) saida[c][q] = amostra;
-      }
-    }
-    this.disponivel -= precisa;
-    return true;
-  }
-}
-registerProcessor('anel-de-audio', AnelDeAudio);
-`;
+import urlDoWorklet from './anel-de-audio.worklet.js?url';
 
 const CANAIS = 2;
 /** Um segundo de folga no anel. Sobra pra engasgo, longe de virar atraso. */
@@ -90,25 +28,41 @@ export interface CapturaIsolada {
 }
 
 /**
+ * Deu certo, ou nao deu e AQUI ESTA O MOTIVO.
+ *
+ * Nao e um `| null` de proposito. Enquanto era null, quem chamava caia no
+ * caminho de reserva sem ter como saber que caiu — foi assim que a 0.30.0
+ * foi pra producao transmitindo o sistema inteiro com o toggle marcado.
+ * Com o motivo na mao, dar de ombros vira uma decisao escrita.
+ */
+export type ResultadoIsolamento =
+  | { ok: true; captura: CapturaIsolada }
+  | { ok: false; motivo: string };
+
+/**
  * Liga a captura isolada e devolve a faixa pronta pra publicar.
  *
- * Devolve null quando nao da (outro sistema, addon ausente, Windows sem a
- * API). Null nao e erro: o chamador cai no caminho de antes, que transmite
- * com a voz da chamada junto. Pior, mas nao impede transmitir.
+ * Quando nao da (outro sistema, addon ausente, Windows sem a API), devolve
+ * o motivo. Nao e fatal: o chamador pode cair no caminho de antes, que
+ * transmite com a voz da chamada junto — mas agora tem como avisar.
  */
-export async function abrirAudioIsolado(): Promise<CapturaIsolada | null> {
-  if (!(await window.disc.audio.disponivel())) return null;
+export async function abrirAudioIsolado(): Promise<ResultadoIsolamento> {
+  if (!(await window.disc.audio.disponivel())) {
+    return { ok: false, motivo: 'o componente de audio nao esta disponivel nesta instalacao' };
+  }
 
   let ctx: AudioContext | null = null;
   let no: AudioWorkletNode | null = null;
   let destino: MediaStreamAudioDestinationNode | null = null;
   let desinscrever: (() => void) | null = null;
-  let url: string | null = null;
 
   try {
     ctx = new AudioContext();
-    url = URL.createObjectURL(new Blob([CODIGO_WORKLET], { type: 'text/javascript' }));
-    await ctx.audioWorklet.addModule(url);
+
+    // urlDoWorklet e um asset de mesma origem que o documento. Ja foi um
+    // Blob, e o Blob passava em dev e era RECUSADO em producao pela CSP
+    // (`script-src 'self'`) — ver o cabecalho do anel-de-audio.worklet.js.
+    await ctx.audioWorklet.addModule(urlDoWorklet);
 
     no = new AudioWorkletNode(ctx, 'anel-de-audio', {
       numberOfInputs: 0,
@@ -146,10 +100,9 @@ export async function abrirAudioIsolado(): Promise<CapturaIsolada | null> {
       no?.disconnect();
       destino?.disconnect();
       await ctx?.close().catch(() => {});
-      if (url) URL.revokeObjectURL(url);
     };
 
-    return { faixa, parar };
+    return { ok: true, captura: { faixa, parar } };
   } catch (err) {
     console.error('[audio-win] nao consegui isolar o som', err);
     // Desmonta o que subiu: um AudioContext pendurado segura o amplificador
@@ -159,7 +112,6 @@ export async function abrirAudioIsolado(): Promise<CapturaIsolada | null> {
     no?.disconnect();
     destino?.disconnect();
     await ctx?.close().catch(() => {});
-    if (url) URL.revokeObjectURL(url);
-    return null;
+    return { ok: false, motivo: (err as Error)?.message || 'falhou por um motivo desconhecido' };
   }
 }

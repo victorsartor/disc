@@ -73,6 +73,20 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
   const [capturing, setCapturing] = useState(false);
   const [justBound, setJustBound] = useState(false);
   const [nivel, setNivel] = useState<number | null>(null);
+  const [versao, setVersao] = useState<string | null>(null);
+
+  // Qual build esta rodando. Parece detalhe, mas sem isso duas builds com o
+  // mesmo numero sao indistinguiveis - foi assim que um teste de chamada
+  // real com outra pessoa foi gasto testando a versao velha sem ninguem
+  // perceber.
+  useEffect(() => {
+    let vivo = true;
+    window.disc.update
+      .version()
+      .then((v) => { if (vivo) setVersao(v); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, []);
 
   // O medidor só pulsa enquanto esta tela está aberta. Fora daqui ninguém
   // olha, e re-renderizar 20 vezes por segundo à toa custa bateria.
@@ -512,6 +526,7 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
         </div>
 
         <div className="modal__foot">
+          <span className="settings__versao">{versao ? `Disneia ${versao}` : ''}</span>
           <button className="btn btn--accent" onClick={onClose}>Fechar</button>
         </div>
       </div>
