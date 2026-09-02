@@ -165,7 +165,11 @@ textarea {
 /* ── Layout ──────────────────────────────────────────────────────────── */
 .app {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  /* O valor de verdade vem do settings.json e é escrito no <html> pelo
+     App.tsx. Este 240px é só o que vale até ele chegar — e o main.tsx já
+     escreve a cópia do localStorage antes da primeira pintura, pela mesma
+     razão do tema: sem isso a coluna abriria estreita e pularia. */
+  grid-template-columns: var(--sidebar-w, 240px) 1fr;
   height: 100%;
   background: var(--level-1);
 }
@@ -177,6 +181,53 @@ textarea {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Âncora da alça de redimensionar, que é filha desta coluna. */
+  position: relative;
+}
+
+/* ── Alça de redimensionar ───────────────────────────────────────────────
+   Fica POR CIMA da borda direita, meio pra fora (right: -3px), porque uma
+   alça de 1px é impossível de pegar com o mouse. A faixa é de 7px e só o
+   cursor denuncia que ela existe; a linha que se vê continua sendo o
+   border-right da barra.
+
+   O no-drag é obrigatório, não detalhe: a alça cruza a .sidebar__brand, que
+   é faixa de arrastar a janela — sem ele, puxar aqui em cima moveria o app
+   inteiro em vez de mudar a largura. */
+.sidebar__resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 7px;
+  z-index: 5;
+  cursor: col-resize;
+  -webkit-app-region: no-drag;
+  /* Sem fundo em repouso: quem marca a divisa é a borda da barra. */
+  background: transparent;
+  transition: background 0.12s;
+}
+
+.sidebar__resizer:hover,
+.sidebar__resizer--ativa {
+  background: var(--accent);
+}
+
+/* Enquanto arrasta, o cursor vale pra tela inteira: o ponteiro sai da faixa
+   de 7px no primeiro movimento rápido, e sem isto ele piscaria entre
+   col-resize e seta a cada quadro.
+
+   O seletor universal e o !important não são exagero: `button` tem
+   `cursor: pointer` lá em cima, e mais de vinte regras deste arquivo pedem
+   pointer ou default. Sem ganhar de todas elas, atravessar a topbar no meio
+   de um arrasto troca o cursor.
+
+   Seleção de texto não precisa de nada aqui: o body já é `user-select: none`
+   e o pointerdown da alça chama preventDefault, então o gesto não começa
+   como seleção. */
+.app--redimensionando,
+.app--redimensionando * {
+  cursor: col-resize !important;
 }
 
 .sidebar__brand {

@@ -302,6 +302,14 @@ export interface Settings {
   themeBg: string;
   themeBar: string;
   themeSymbol: string;
+  /**
+   * Largura da barra lateral, em pixels. Preferência da máquina.
+   *
+   * Fica no settings.json (userData) e não no localStorage porque o userData
+   * sobrevive à atualização do app. Os limites estão em electron/settings.ts
+   * e são reaplicados lá: o que sai daqui é pedido, não verdade.
+   */
+  sidebarWidth: number;
   /** Falso em Wayland e onde o hook global de teclado nao sobe. */
   pttAvailable: boolean;
 }

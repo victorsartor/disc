@@ -330,6 +330,34 @@ export function App() {
     if (barra && simbolo) void window.disc.titlebar(barra, simbolo, janela || undefined);
   }, [theme, settingsCarregou]);
 
+  // A largura da barra lateral segue o mesmo desenho do tema logo acima:
+  // mora no settings.json (que sobrevive à atualização do app), quem desenha
+  // é o CSS a partir de uma variável no <html>, e uma cópia no localStorage
+  // evita o pulo na abertura.
+  const larguraSidebar = room.settings?.sidebarWidth ?? 240;
+
+  useEffect(() => {
+    // Mesmo motivo do efeito do tema: antes de as configurações chegarem
+    // este valor é só o padrão provisório, e aplicá-lo desfaria o que o
+    // main.tsx já pintou a partir do localStorage.
+    if (!settingsCarregou) return;
+
+    // Este efeito é o ÚNICO caminho da largura vinda do disco. O arrasto
+    // escreve na mesma variável por fora do React (SidebarResizer), e as
+    // duas coisas não brigam porque as dependências aqui só mudam quando o
+    // settings.json muda — nunca no meio de um gesto.
+    document.documentElement.style.setProperty('--sidebar-w', `${larguraSidebar}px`);
+    try {
+      localStorage.setItem('larguraSidebar', String(larguraSidebar));
+    } catch {
+      /* sem armazenamento: só perde o atalho contra o pulo */
+    }
+  }, [larguraSidebar, settingsCarregou]);
+
+  const salvarLargura = useCallback((px: number) => {
+    void room.updateSettings({ sidebarWidth: px });
+  }, [room]);
+
   const { channels: presence, users } = usePresence(Boolean(loggedIn), room.channelId);
 
   // Microfone aberto num canal é o que segura o status em "disponível".
@@ -520,6 +548,8 @@ export function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenProfile={() => setProfileOpen(true)}
         onOpenUser={openUser}
+        largura={larguraSidebar}
+        onLarguraChange={salvarLargura}
       />
 
       <div className="main">

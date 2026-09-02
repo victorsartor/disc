@@ -80,7 +80,26 @@ export interface Settings {
   themeBg: string;
   themeBar: string;
   themeSymbol: string;
+  /**
+   * Largura da barra lateral, em pixels. Preferencia da maquina.
+   *
+   * Mora aqui, e nao no localStorage do renderer, porque o userData sobrevive
+   * a atualizacao do app e a pasta de instalacao nao: era exatamente o
+   * "nao mudar toda vez que o app atualiza" que o pedido tinha.
+   *
+   * Os limites nao sao enfeite. Abaixo de LARGURA_MIN a linha do
+   * participante (avatar + nome + etiqueta AO VIVO) para de caber e o nome
+   * some inteiro atras das reticencias; acima de LARGURA_MAX a coluna comeca
+   * a comer o chat. Como o valor entra num grid-template-columns, um NaN
+   * gravado a mao no settings.json nao desenharia errado - invalidaria a
+   * regra e colapsaria a coluna pra zero.
+   */
+  sidebarWidth: number;
 }
+
+/** Ver o comentario do sidebarWidth. Repetidos no CSS como var(--sidebar-w). */
+export const LARGURA_MIN = 180;
+export const LARGURA_MAX = 480;
 
 const DEFAULTS: Settings = {
   voiceMode: 'vad',
@@ -115,6 +134,7 @@ const DEFAULTS: Settings = {
   themeBg: '#0d1b2a',
   themeBar: '#1b263b',
   themeSymbol: '#e0e1dd',
+  sidebarWidth: 240,
 };
 
 let cache: Settings | null = null;
@@ -126,6 +146,13 @@ function percentual(v: unknown, padrao: number): number {
   const n = Number(v);
   if (!Number.isFinite(n)) return padrao;
   return Math.min(100, Math.max(0, Math.round(n)));
+}
+
+/** Uma largura dentro dos limites, ou o padrao. Usada na leitura e no patch. */
+function largura(v: unknown, padrao: number): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return padrao;
+  return Math.min(LARGURA_MAX, Math.max(LARGURA_MIN, Math.round(n)));
 }
 
 /** Um #rrggbb valido, ou o padrao. Usado na leitura; o patch tem o seu. */
@@ -165,6 +192,9 @@ export function getSettings(): Settings {
       themeBg: cor(raw.themeBg, DEFAULTS.themeBg),
       themeBar: cor(raw.themeBar, DEFAULTS.themeBar),
       themeSymbol: cor(raw.themeSymbol, DEFAULTS.themeSymbol),
+      // Pelo mesmo motivo das cores: vai virar grid-template-columns, e um
+      // valor invalido ali colapsa a barra lateral inteira.
+      sidebarWidth: largura(raw.sidebarWidth, DEFAULTS.sidebarWidth),
     };
   } catch {
     next = { ...DEFAULTS };
@@ -186,7 +216,7 @@ const ALLOWED_KEYS = new Set<keyof Settings>([
   'voiceVolume', 'effectsVolume', 'chatVolume',
   'screenAudioDeviceId', 'isolarAudioNaTela',
   'overlayEnabled', 'overlayX', 'overlayY', 'theme',
-  'themeBg', 'themeBar', 'themeSymbol',
+  'themeBg', 'themeBar', 'themeSymbol', 'sidebarWidth',
 ]);
 
 /**
@@ -229,6 +259,11 @@ export function sanitizePatch(input: unknown): Partial<Settings> {
     if (COLOR_KEYS.has(k as keyof Settings)) {
       if (typeof v !== 'string' || !HEX.test(v.trim())) continue;
       out[k] = v.trim();
+      continue;
+    }
+    if (k === 'sidebarWidth') {
+      if (!Number.isFinite(Number(v))) continue;
+      out[k] = largura(v, DEFAULTS.sidebarWidth);
       continue;
     }
     out[k] = v;

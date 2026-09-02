@@ -9,6 +9,7 @@ import {
   IconHeadphonesOff, IconLeave, IconSettings,
 } from './Icons';
 import { Avatar } from './Profile';
+import { SidebarResizer } from './SidebarResizer';
 import { STATUS } from '../lib/status';
 import logo from '../assets/logo.png';
 
@@ -89,6 +90,9 @@ interface Props {
   onOpenProfile: () => void;
   /** Abre o perfil de quem foi clicado — inclusive o seu. */
   onOpenUser: (identity: string) => void;
+  /** Largura salva desta coluna, em pixels. */
+  largura: number;
+  onLarguraChange: (largura: number) => void;
 }
 
 export function Sidebar({
@@ -96,6 +100,7 @@ export function Sidebar({
   connecting, micOn, deafened,
   pttMode, pttDown, onJoin, onLeave, onToggleMic, onToggleDeafen,
   onVolumeChange, onOpenSettings, onOpenProfile, onOpenUser,
+  largura, onLarguraChange,
 }: Props) {
   // Este é o estado da CONEXÃO com o canal, não o status de presença. São
   // coisas diferentes: dá pra estar "Disponível" sem estar em canal nenhum.
@@ -109,6 +114,7 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
+      <SidebarResizer largura={largura} onSalvar={onLarguraChange} />
       <div className="sidebar__brand">
         <img className="sidebar__logo" src={logo} alt="" />
         Disneia
