@@ -152,6 +152,14 @@ export interface Message {
   poll?: Poll | null;
   /** Vazio na maioria. Opcional pelo mesmo motivo dos anexos: app antigo. */
   reactions?: Reaction[];
+  /**
+   * Ids de quem foi mencionado, resolvidos pelo SERVIDOR na gravação.
+   *
+   * É esta lista que decide o som e a notificação — nunca uma releitura do
+   * texto aqui. O autor nunca está nela: mencionar a si mesmo não avisa
+   * ninguém.
+   */
+  mentions?: string[];
   /** Quando foi editada. null/ausente = nunca foi. */
   edited_at?: number | null;
   /**
@@ -425,6 +433,14 @@ export interface DiscApi {
   /** 'linux', 'win32', 'darwin' — decide quem desenha o seletor de tela. */
   platform: string;
   copy(text: string): Promise<void>;
+  /**
+   * Notificação do sistema por menção.
+   *
+   * Só aparece com a janela fora de foco — quem decide é o processo main.
+   * Daqui é sempre seguro chamar: com o app na frente ela simplesmente não
+   * sai, e assim o renderer não precisa saber se tem foco.
+   */
+  notificarMencao(autor: string, corpo: string): Promise<void>;
   settings: {
     get(): Promise<Settings>;
     patch(patch: Partial<Settings>): Promise<Settings>;

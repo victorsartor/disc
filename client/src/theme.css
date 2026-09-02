@@ -756,6 +756,175 @@ textarea {
   color: var(--alabaster);
 }
 
+/* ── Código e menções (0.32) ──────────────────────────────────────────── */
+
+/* Crase simples, no meio de uma frase. Fundo próprio pra separar do texto
+   corrido sem virar um bloco — ele continua na linha. */
+.msg__codigo {
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: 0.88em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--level-0);
+  border: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.msg__bloco-wrap {
+  margin: 5px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--level-0);
+  overflow: hidden;
+  /* Sem isto, um bloco largo estica a coluna da conversa e empurra tudo. */
+  max-width: 100%;
+}
+
+.msg__bloco-topo {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 3px 6px 3px 10px;
+  border-bottom: 1px solid var(--line);
+  min-height: 26px;
+}
+
+.msg__bloco-lingua {
+  margin-right: auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lavender);
+}
+
+.msg__copiar {
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  color: var(--lavender);
+  font-size: 11px;
+  font-weight: 600;
+  transition: background 0.1s, color 0.1s;
+}
+
+.msg__copiar:hover {
+  background: var(--hover);
+  color: var(--alabaster);
+}
+
+/* A regra que importa: o bloco rola DENTRO da própria caixa. Sem o
+   overflow-x aqui, uma linha comprida de código alarga a conversa inteira e
+   a janela passa a rolar de lado. */
+.msg__bloco {
+  margin: 0;
+  padding: 9px 11px;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre;
+  user-select: text;
+  color: var(--alabaster);
+}
+
+/* ── Menções ──────────────────────────────────────────────────────────── */
+.mencao {
+  display: inline;
+  padding: 0 3px;
+  border-radius: 4px;
+  font-weight: 600;
+  color: var(--alabaster);
+  background: color-mix(in srgb, var(--dusk) 45%, transparent);
+  transition: background 0.1s;
+}
+
+.mencao:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--dusk) 70%, transparent);
+}
+
+.mencao:disabled {
+  cursor: default;
+}
+
+/* A menção a VOCÊ (ou o @todos) sai na cor de destaque: numa conversa cheia
+   de menções, achar as suas de relance é a única coisa que importa. */
+.mencao--eu {
+  color: var(--level-1);
+  background: var(--live);
+}
+
+.mencao--eu:hover:not(:disabled) {
+  background: var(--live);
+  filter: brightness(1.1);
+}
+
+/* Fio na lateral do balão em que te mencionaram. O som já passou quando
+   você voltar pro app; isto é o que sobra pra achar a mensagem sem rolar a
+   conversa procurando o próprio nome. */
+.msg--mencionado {
+  background: color-mix(in srgb, var(--live) 9%, transparent);
+  box-shadow: inset 2px 0 0 var(--live);
+}
+
+.msg--mencionado:hover {
+  background: color-mix(in srgb, var(--live) 14%, transparent);
+}
+
+/* ── Menu do @ no campo de escrita ────────────────────────────────────── */
+/* Flutua ACIMA do campo, ancorado no .chat__linha. No fluxo ele empurraria
+   a caixa de texto pra baixo a cada tecla digitada. */
+.mencao-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 4px;
+  background: var(--level-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.32);
+}
+
+.mencao-menu__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 13.5px;
+  color: var(--alabaster);
+}
+
+/* Uma marcação só pro teclado e pro mouse: o onMouseEnter move a seleção,
+   então o item sob o cursor e o item sob as setas são sempre o mesmo. Duas
+   marcações competindo seria o jeito de ninguém saber o que o Enter faz. */
+.mencao-menu__item--sel {
+  background: var(--dusk);
+}
+
+.mencao-menu__nome {
+  font-weight: 600;
+}
+
+.mencao-menu__dica {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--lavender);
+}
+
+.mencao-menu__item--sel .mencao-menu__dica {
+  color: var(--alabaster);
+}
+
 /* ── Ações da mensagem (0.31) ─────────────────────────────────────────── */
 
 /* Flutua sobre o canto de cima à direita, meio degrau acima do balão, do
@@ -1045,6 +1214,8 @@ textarea {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  /* Âncora do menu do @, que flutua logo acima (ver .mencao-menu). */
+  position: relative;
 }
 
 .chat__clipe {

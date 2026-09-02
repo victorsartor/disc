@@ -118,6 +118,10 @@ const api = {
 
   copy: (text: string) => ipcRenderer.invoke('clipboard:write', text),
 
+  /** Balaozinho do sistema. So sai com a janela fora de foco - o main confere. */
+  notificarMencao: (autor: string, corpo: string): Promise<void> =>
+    ipcRenderer.invoke('notify:mention', autor, corpo),
+
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     patch: (patch: unknown) => ipcRenderer.invoke('settings:patch', patch),

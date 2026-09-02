@@ -9,9 +9,10 @@ import { registerAuthRoutes, userFromRequest } from './auth.js';
 import {
   recentMessages, saveMessage, touchPresence, setStatus, findUserById,
   findPoll, setVote, messageById, messageOwner, editMessage, deleteMessage,
-  toggleReaction, purgeMessage,
+  toggleReaction, purgeMessage, allUsers,
   type User, type NovaPoll, type MessageRow,
 } from './db.js';
+import { mencionadosEm } from './texto.js';
 import { rateLimit } from './ratelimit.js';
 import { presence, usersPresence, statusEfetivo } from './presence.js';
 import { registerProfileRoutes } from './profile.js';
@@ -57,6 +58,23 @@ function isAdmin(user: User): boolean {
  */
 function paraOCliente(m: MessageRow) {
   return { ...m, attachments: m.attachments.map(paraCliente) };
+}
+
+/**
+ * Quem o texto menciona, resolvido AQUI e não no cliente.
+ *
+ * É esta lista que decide quem recebe notificação, então ela não pode
+ * depender de cada app reinterpretar a frase — um cliente numa versão
+ * anterior deixaria alguém sem aviso sem ninguém perceber. O tokenizer é
+ * literalmente o mesmo arquivo dos dois lados (ver texto.ts), então o que
+ * vira chip na tela e o que vira notificação nunca discordam.
+ */
+function mencoesDe(corpo: string, autorId: string): string[] {
+  return mencionadosEm(
+    corpo,
+    allUsers().map((u) => ({ id: u.id, name: u.name })),
+    autorId,
+  );
 }
 
 app.get('/health', async () => ({ ok: true }));
@@ -294,7 +312,10 @@ app.post('/api/messages', async (req, reply) => {
   try {
     // Guardamos o texto cru. A sanitização acontece na renderização,
     // que é o único lugar onde XSS pode virar execução.
-    id = saveMessage(user.id, text, attachmentId ?? null, novaPoll, respondendo);
+    id = saveMessage(
+      user.id, text, attachmentId ?? null, novaPoll, respondendo,
+      mencoesDe(text, user.id),
+    );
   } catch {
     return reply.code(400).send({ error: 'anexo inválido' });
   }
@@ -348,7 +369,9 @@ app.patch('/api/messages/:id', async (req, reply) => {
     return reply.code(400).send({ error: 'mensagem vazia — use apagar' });
   }
 
-  editMessage(id, text);
+  // As menções são refeitas junto: quem foi tirado da frase para de estar
+  // marcado, e quem foi adicionado passa a estar. Na mesma transação.
+  editMessage(id, text, mencoesDe(text, user.id));
   return { message: paraOCliente(messageById(id)!) };
 });
 

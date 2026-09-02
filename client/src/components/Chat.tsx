@@ -5,10 +5,11 @@ import { Anexo, Lightbox, tamanhoLegivel } from './Anexo';
 import { Enquete, NovaEnqueteForm } from './Enquete';
 import {
   IconClipe, IconClose, IconDescer, IconEnquete,
-  IconReagir, IconResponder, IconLapis, IconLixeira,
+  IconReagir, IconResponder, IconLapis, IconLixeira, IconCopiar,
 } from './Icons';
 import { ehImagemAnimada, prepareChatImage } from '../lib/image';
 import { mensagemDeErro } from '../lib/erros';
+import { tokenizar, acharMencoes, MENCAO_TODOS, type Mencionavel } from '../lib/texto';
 
 const timeFmt = new Intl.DateTimeFormat('pt-BR', {
   hour: '2-digit',
@@ -59,6 +60,13 @@ interface Props {
   isAdmin: boolean;
   /** A tirinha de emojis, na ordem em que o servidor a define. */
   reactionEmojis: string[];
+  /**
+   * Todo mundo do servidor, pro autocomplete do @ e pra desenhar os chips.
+   *
+   * Vem da presença, que traz o servidor inteiro e não só quem está em call:
+   * dá pra mencionar quem está offline, e a pessoa lê quando voltar.
+   */
+  gente: Mencionavel[];
   /** Como mostrar quem votou. 'Você' pra si mesmo. */
   nomeDe: (id: string) => string;
   /** Guarda a apuração nova que o servidor devolveu depois de um voto. */
@@ -74,7 +82,7 @@ interface Props {
 }
 
 export function Chat({
-  messages, onSend, onOpenUser, chatVolume, meId, isAdmin, reactionEmojis,
+  messages, onSend, onOpenUser, chatVolume, meId, isAdmin, reactionEmojis, gente,
   nomeDe, onApurarPoll, onVotou, onEditar, onApagar, onReagir, onRemoverDeVez,
 }: Props) {
   const [draft, setDraft] = useState('');
@@ -112,6 +120,73 @@ export function Chat({
   const [erro, setErro] = useState<string | null>(null);
   /** A imagem aberta em tela cheia. */
   const [ampliada, setAmpliada] = useState<Attachment | null>(null);
+
+  /**
+   * O autocomplete do @: onde começa a menção sendo digitada, e qual opção
+   * está sob o cursor. null = fechado.
+   */
+  const [mencionando, setMencionando] = useState<{ inicio: number; busca: string } | null>(null);
+  const [escolhido, setEscolhido] = useState(0);
+
+  /**
+   * Quem casa com o que está sendo digitado depois do @.
+   *
+   * `todos` entra na lista como se fosse gente, e no topo: é a menção mais
+   * usada num grupo desse tamanho, e mantê-la fora obrigaria a lembrar que
+   * ela existe.
+   */
+  const candidatos = (() => {
+    if (!mencionando) return [];
+    const busca = mencionando.busca.toLowerCase();
+    return [
+      { id: null as string | null, name: MENCAO_TODOS },
+      ...gente,
+    ]
+      .filter((g) => g.name.toLowerCase().startsWith(busca))
+      .slice(0, 6);
+  })();
+
+  /**
+   * Descobre se o cursor está no meio de uma menção sendo digitada.
+   *
+   * Olha pra trás a partir do cursor até achar um @ que comece palavra. Para
+   * na quebra de linha e depois de 24 caracteres: sem esses limites,
+   * qualquer @ escrito lá em cima da mensagem manteria o menu aberto pelo
+   * resto do texto.
+   */
+  const conferirMencao = (texto: string, cursor: number) => {
+    for (let i = cursor - 1; i >= 0 && cursor - i <= 24; i--) {
+      const c = texto[i];
+      if (c === '\n') break;
+      if (c !== '@') continue;
+
+      const antes = i > 0 ? texto[i - 1] : ' ';
+      if (/[\p{L}\p{N}_@]/u.test(antes)) break;
+
+      setMencionando({ inicio: i, busca: texto.slice(i + 1, cursor) });
+      setEscolhido(0);
+      return;
+    }
+    setMencionando(null);
+  };
+
+  /** Troca o "@bus" pelo nome inteiro e devolve o cursor pro fim dele. */
+  const escolherMencao = (nome: string) => {
+    if (!mencionando) return;
+    const antes = draft.slice(0, mencionando.inicio);
+    const depois = draft.slice(mencionando.inicio + 1 + mencionando.busca.length);
+    const novo = `${antes}@${nome} ${depois}`;
+    setDraft(novo);
+    setMencionando(null);
+
+    // O cursor tem que ir pro fim do nome, não pro fim do texto: quem
+    // menciona no meio de uma frase continua escrevendo dali.
+    const posicao = antes.length + nome.length + 2;
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(posicao, posicao);
+    });
+  };
 
   /**
    * Sobe o arquivo NA HORA da escolha, antes de a mensagem existir.
@@ -385,6 +460,7 @@ export function Chat({
                 meId={meId}
                 isAdmin={isAdmin}
                 reactionEmojis={reactionEmojis}
+                gente={gente}
                 chatVolume={chatVolume}
                 destacada={destacada === m.id}
                 registrarRef={(el) => {
@@ -480,6 +556,31 @@ export function Chat({
           />
         ) : (
           <div className="chat__linha">
+            {/* O menu do @ flutua ACIMA do campo, ancorado nele. No fluxo ele
+                empurraria a caixa de texto pra baixo a cada tecla. */}
+            {mencionando && candidatos.length > 0 && (
+              <div className="mencao-menu">
+                {candidatos.map((c, i) => (
+                  <button
+                    key={c.id ?? MENCAO_TODOS}
+                    className={`mencao-menu__item${i === escolhido ? ' mencao-menu__item--sel' : ''}`}
+                    // onMouseDown, e não onClick: o clique tira o foco do
+                    // textarea antes do onClick disparar, e aí o menu já
+                    // fechou pelo onBlur e o clique cai no vazio.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      escolherMencao(c.name);
+                    }}
+                    onMouseEnter={() => setEscolhido(i)}
+                  >
+                    <span className="mencao-menu__nome">{c.name}</span>
+                    {c.id === null && (
+                      <span className="mencao-menu__dica">avisa todo mundo</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
             {/* O input fica escondido: quem aparece é o botão do clipe, que
                 casa com o resto da interface. */}
             <input
@@ -525,8 +626,45 @@ export function Chat({
               }
               value={draft}
               maxLength={2000}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                conferirMencao(e.target.value, e.target.selectionStart);
+              }}
+              // O cursor pode andar sem o texto mudar (setas, clique), e o
+              // menu tem que acompanhar: sair de dentro de um @ fecha.
+              onSelect={(e) => {
+                const el = e.target as HTMLTextAreaElement;
+                conferirMencao(el.value, el.selectionStart);
+              }}
+              onBlur={() => setMencionando(null)}
               onKeyDown={(e) => {
+                // Com o menu aberto, o teclado é DELE. Enter aqui escolhe a
+                // pessoa em vez de mandar a mensagem — mandar no meio de uma
+                // menção pela metade é o erro que essa captura evita.
+                const menuAberto = mencionando && candidatos.length > 0;
+                if (menuAberto) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setEscolhido((i) => (i + 1) % candidatos.length);
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setEscolhido((i) => (i - 1 + candidatos.length) % candidatos.length);
+                    return;
+                  }
+                  if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    escolherMencao(candidatos[escolhido].name);
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setMencionando(null);
+                    return;
+                  }
+                }
+
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   void send();
@@ -542,6 +680,120 @@ export function Chat({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * O corpo da mensagem: texto, código e menções.
+ *
+ * Tudo vira ELEMENTO REACT, nunca HTML. Não há `dangerouslySetInnerHTML`
+ * em lugar nenhum deste caminho, e é por isso que não existe sanitização
+ * aqui: o React escapa todo texto que passa como filho, então um
+ * `<img onerror=...>` digitado por alguém aparece como esses caracteres
+ * mesmo, dentro ou fora de um bloco de código.
+ *
+ * Quem separa código de texto é o tokenizar — o MESMO que o servidor usa
+ * pra decidir quem foi mencionado. Ver o comentário em lib/texto.ts.
+ */
+function Corpo({
+  texto, gente, meId, onOpenUser,
+}: {
+  texto: string;
+  gente: Mencionavel[];
+  meId: string;
+  onOpenUser: (identity: string) => void;
+}) {
+  return (
+    <>
+      {tokenizar(texto).map((seg, i) => {
+        if (seg.tipo === 'bloco') return <Bloco key={i} texto={seg.texto} lingua={seg.lingua} />;
+        if (seg.tipo === 'codigo') return <code key={i} className="msg__codigo">{seg.texto}</code>;
+        return (
+          <TextoComMencoes
+            key={i}
+            texto={seg.texto}
+            gente={gente}
+            meId={meId}
+            onOpenUser={onOpenUser}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/** Um trecho de texto puro, com os @nomes virando chip clicável. */
+function TextoComMencoes({
+  texto, gente, meId, onOpenUser,
+}: {
+  texto: string;
+  gente: Mencionavel[];
+  meId: string;
+  onOpenUser: (identity: string) => void;
+}) {
+  const mencoes = acharMencoes(texto, gente);
+  if (mencoes.length === 0) return <>{texto}</>;
+
+  const pedacos: React.ReactNode[] = [];
+  let cursor = 0;
+
+  mencoes.forEach((m, i) => {
+    if (m.inicio > cursor) pedacos.push(texto.slice(cursor, m.inicio));
+
+    // Ser VOCÊ o mencionado muda a cor: numa conversa cheia de menções, o
+    // que interessa é achar as suas de relance.
+    const euMesmo = m.id === meId || m.id === null;
+    pedacos.push(
+      <button
+        key={`m${i}`}
+        className={`mencao${euMesmo ? ' mencao--eu' : ''}`}
+        // @todos não é pessoa e não abre perfil nenhum.
+        onClick={m.id ? () => onOpenUser(m.id!) : undefined}
+        disabled={!m.id}
+        title={m.id ? `Ver o perfil de ${m.rotulo}` : 'Menção a todo mundo'}
+      >
+        @{m.rotulo}
+      </button>,
+    );
+    cursor = m.fim;
+  });
+
+  if (cursor < texto.length) pedacos.push(texto.slice(cursor));
+  return <>{pedacos}</>;
+}
+
+/** Bloco de código com botão de copiar. */
+function Bloco({ texto, lingua }: { texto: string; lingua: string }) {
+  const [copiado, setCopiado] = useState(false);
+
+  useEffect(() => {
+    if (!copiado) return;
+    const t = window.setTimeout(() => setCopiado(false), 1500);
+    return () => window.clearTimeout(t);
+  }, [copiado]);
+
+  return (
+    <div className="msg__bloco-wrap">
+      <div className="msg__bloco-topo">
+        {lingua && <span className="msg__bloco-lingua">{lingua}</span>}
+        <button
+          className="msg__copiar"
+          onClick={() => {
+            // window.disc.copy, e não navigator.clipboard: em contexto
+            // file:// a API do navegador não é confiável, e o app roda
+            // exatamente assim depois de instalado.
+            void window.disc.copy(texto);
+            setCopiado(true);
+          }}
+          title="Copiar o bloco"
+        >
+          {copiado ? 'copiado' : <IconCopiar size={13} />}
+        </button>
+      </div>
+      {/* overflow-x no <pre> (ver theme.css): linha comprida rola DENTRO da
+          caixa em vez de alargar a conversa inteira. */}
+      <pre className="msg__bloco"><code>{texto}</code></pre>
     </div>
   );
 }
@@ -568,6 +820,7 @@ interface BalaoProps {
   meId: string;
   isAdmin: boolean;
   reactionEmojis: string[];
+  gente: Mencionavel[];
   chatVolume: number;
   destacada: boolean;
   registrarRef: (el: HTMLDivElement | null) => void;
@@ -585,7 +838,7 @@ interface BalaoProps {
 }
 
 function Balao({
-  m, seguida, meId, isAdmin, reactionEmojis, chatVolume, destacada,
+  m, seguida, meId, isAdmin, reactionEmojis, gente, chatVolume, destacada,
   registrarRef, nomeDe, onOpenUser, onAmpliar, onApurarPoll, onVotou,
   onResponder, onPularPara, onEditar, onApagar, onReagir, onRemoverDeVez,
 }: BalaoProps) {
@@ -615,11 +868,17 @@ function Balao({
   const meu = m.user_id === meId;
   const podeApagar = meu || isAdmin;
 
+  // Mencionaram VOCÊ: o balão ganha um fio na lateral. É o que faz a menção
+  // ser achável de relance ao voltar pro app depois de um tempo fora — o som
+  // já passou, e rolar a conversa procurando o próprio nome não é achar.
+  const mencionado = m.mentions?.includes(meId) ?? false;
+
   const classes = [
     'msg',
     seguida ? 'msg--seguida' : '',
     destacada ? 'msg--destacada' : '',
     m.deleted ? 'msg--removida' : '',
+    mencionado ? 'msg--mencionado' : '',
   ].filter(Boolean).join(' ');
 
   const salvarEdicao = async () => {
@@ -737,11 +996,11 @@ function Balao({
           </div>
         ) : (
           <>
-            {/* Texto puro via children do React — escapado automaticamente.
+            {/* Tudo via children do React — escapado automaticamente.
                 Nada de dangerouslySetInnerHTML aqui. */}
             {m.body && (
               <div className="msg__text">
-                {m.body}
+                <Corpo texto={m.body} gente={gente} meId={meId} onOpenUser={onOpenUser} />
                 {m.edited_at != null && (
                   <span
                     className="msg__editado"

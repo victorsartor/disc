@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Me, Message, NovaEnquete, Poll, UserProfile } from './types';
 import { MAX_ASSISTINDO, useRoom } from './lib/useRoom';
 import { usePresence, useStatus } from './lib/usePresence';
@@ -15,7 +15,7 @@ import { ObsSetup } from './components/ObsSetup';
 import { Profile, UserCard } from './components/Profile';
 import { IconScreen, IconBroadcast, IconEye, IconEyeOff } from './components/Icons';
 import { DEFAULT_THEME, isThemeId, type ThemeId } from './lib/themes';
-import { playNotify } from './lib/sounds';
+import { playNotify, playMention } from './lib/sounds';
 
 /**
  * Duas versões da MESMA mensagem dizem a mesma coisa?
@@ -42,6 +42,20 @@ function mesmoConteudo(a: Message, b: Message): boolean {
   if (a.poll && b.poll && JSON.stringify(a.poll) !== JSON.stringify(b.poll)) return false;
 
   return true;
+}
+
+/**
+ * O que a notificação do sistema mostra no corpo.
+ *
+ * Mensagem de menção quase sempre tem texto — é o caso de "@fulano bora?".
+ * Os outros existem porque dá pra mencionar alguém numa enquete ou numa
+ * foto, e um balãozinho vazio no canto da tela não diz por que apareceu.
+ */
+function resumoParaAviso(m: Message): string {
+  if (m.body.trim()) return m.body;
+  if (m.poll) return `Enquete: ${m.poll.question}`;
+  if (m.attachments?.length) return `Mandou ${m.attachments[0].name}`;
+  return 'Mencionou você';
 }
 
 export function App() {
@@ -83,7 +97,29 @@ export function App() {
     if (seenRef.current.has(m.id)) return;
     seenRef.current.add(m.id);
     setMessages((prev) => [...prev, m].sort((a, b) => a.id - b.id));
-    if (historicoCarregadoRef.current && m.user_id !== meRef.current?.id) playNotify();
+
+    if (!historicoCarregadoRef.current) return;
+    const eu = meRef.current?.id;
+    if (!eu || m.user_id === eu) return;
+
+    /**
+     * Menção tem som próprio e chama fora do app; mensagem comum, não.
+     *
+     * A lista vem do SERVIDOR (m.mentions) e não de reler o texto aqui —
+     * assim o que dispara a notificação é a mesma decisão que marcou o
+     * balão, e não uma segunda interpretação da frase.
+     *
+     * A notificação é sempre pedida: quem confere se a janela está em foco
+     * é o processo main. Com o app na frente ela simplesmente não sai.
+     */
+    if (m.mentions?.includes(eu)) {
+      playMention();
+      void window.disc.notificarMencao(m.author_name, resumoParaAviso(m)).catch(() => {
+        /* notificacao e enfeite: nao vale um erro na tela */
+      });
+    } else {
+      playNotify();
+    }
   }, []);
 
   /**
@@ -383,6 +419,19 @@ export function App() {
     return users.find((u) => u.identity === id)?.name ?? 'alguém';
   }, [users, me?.id]);
 
+  /**
+   * Quem dá pra mencionar, no formato que o tokenizer espera.
+   *
+   * Memoizado porque a presença se refaz a cada volta do polling, e sem isto
+   * a lista viraria um array novo a cada 3 segundos — re-renderizando o chat
+   * inteiro sozinho, que é exatamente o que o sincronizarMensagens evita do
+   * outro lado.
+   */
+  const gente = useMemo(
+    () => users.map((u) => ({ id: u.identity, name: u.name })),
+    [users],
+  );
+
   // Espelha o estado da sala no overlay
   const activeName = me?.channels.find((c) => c.id === room.channelId)?.name ?? null;
   useEffect(() => {
@@ -508,6 +557,9 @@ export function App() {
           // da tirinha em vez de só não desenhar nada.
           isAdmin={me.isAdmin ?? false}
           reactionEmojis={me.reactionEmojis ?? []}
+          // Da presença: todo mundo do servidor, não só quem está em call.
+          // Dá pra mencionar quem está offline — ele lê quando voltar.
+          gente={gente}
           nomeDe={nomeDe}
           onApurarPoll={aplicarPoll}
           onVotou={room.broadcastVote}

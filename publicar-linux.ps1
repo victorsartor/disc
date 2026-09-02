@@ -27,6 +27,7 @@ $ErrorActionPreference = "Stop"
 
 $raiz = $PSScriptRoot
 $clientDir = Join-Path $raiz "client"
+$serverSrc = Join-Path $raiz "server\src"
 $releaseLinux = Join-Path $clientDir "release-linux"
 $destino = Join-Path $raiz "atualizacoes"
 
@@ -77,17 +78,34 @@ foreach ($vol in @("disneia-linux-modules", "disneia-linux-cache-electron", "dis
 }
 
 # --- Compila dentro do container ------------------------------------------
+# O container enxerga DUAS pastas, montadas na mesma forma que tem no disco:
+#
+#   /repo/client      o app inteiro
+#   /repo/server/src  so pelo texto.ts, que o cliente importa (ver
+#                     client/src/lib/texto.ts). Somente leitura: o cliente le
+#                     do servidor, nunca o contrario.
+#
+# NAO montar a raiz do repo aqui, por mais tentador que pareca. A raiz tem o
+# .env e o certs/, e este container roda `npm ci` - ou seja, roda script de
+# postinstall de dependencia de terceiro. Montando so estas duas, nao ha
+# segredo nenhum ao alcance.
+#
+# Se um dia o cliente importar outra coisa de fora de client/, o build do
+# Windows continua passando (roda no disco, com o repo inteiro) e SO ESTE
+# aqui quebra. O erro e "Cannot find module" apontando pro caminho de fora.
+# A correcao e montar aquilo tambem, do mesmo jeito.
 Write-Host "Compilando (dentro do container Linux)..." -ForegroundColor Cyan
 
 docker run --rm `
-    -v "${clientDir}:/project" `
-    -v "disneia-linux-modules:/project/node_modules" `
+    -v "${clientDir}:/repo/client" `
+    -v "${serverSrc}:/repo/server/src:ro" `
+    -v "disneia-linux-modules:/repo/client/node_modules" `
     -v "disneia-linux-cache-electron:/root/.cache/electron" `
     -v "disneia-linux-cache-builder:/root/.cache/electron-builder" `
     -e "VITE_SERVER_URL=$dominio" `
     -e "ELECTRON_CACHE=/root/.cache/electron" `
     -e "ELECTRON_BUILDER_CACHE=/root/.cache/electron-builder" `
-    -w /project `
+    -w /repo/client `
     electronuserland/builder:20 `
     bash -lc "npm ci --no-audit --no-fund && npm run build && npx electron-builder --linux AppImage --publish never -c.directories.output=release-linux"
 

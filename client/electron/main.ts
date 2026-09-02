@@ -1,6 +1,7 @@
 import {
   app, BrowserWindow, ipcMain, shell, safeStorage,
   desktopCapturer, globalShortcut, clipboard, Menu, session, dialog,
+  Notification,
 } from 'electron';
 import { join, dirname, basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -690,6 +691,52 @@ ipcMain.on('overlay:state', (_e, payload: unknown) => {
 
 ipcMain.on('overlay:interactive', (_e, interactive: boolean) => {
   setInteractive(interactive);
+});
+
+// --- IPC: notificacao de mencao ------------------------------------------
+/**
+ * Balaozinho do sistema quando alguem te menciona.
+ *
+ * SO com a janela fora de foco. Notificar quem ja esta olhando a conversa e
+ * ruido puro, e ruido e o que faz a pessoa desligar a notificacao inteira -
+ * inclusive a que importa. Quem esta com o app na frente ja tem o som e o
+ * destaque no balao.
+ *
+ * Quem decide QUE e mencao e o servidor (ver message_mentions): aqui so
+ * chega o que ja foi resolvido. O renderer nunca releu o texto pra isso.
+ *
+ * Falha em silencio de proposito. Notificacao e enfeite: sistema com
+ * notificacao desligada, Windows recusando o AppUserModelId, foco de
+ * notificacao ligado - nada disso pode virar erro na tela de quem so queria
+ * ler uma mensagem.
+ */
+ipcMain.handle('notify:mention', (_e, autor: unknown, corpo: unknown) => {
+  try {
+    if (!Notification.isSupported()) return;
+    const janela = win;
+    if (!janela || janela.isDestroyed() || janela.isFocused()) return;
+
+    const n = new Notification({
+      title: `${String(autor)} mencionou voce`,
+      // Truncado aqui e nao no renderer: o Windows corta sozinho, mas um
+      // corpo gigante atravessando o IPC a cada mencao e desperdicio.
+      body: String(corpo).slice(0, 200),
+      silent: false,
+    });
+
+    // Clicar traz a Disneia pra frente, que e a unica coisa que a pessoa
+    // quer fazer depois de ver que chamaram ela.
+    n.on('click', () => {
+      if (janela.isDestroyed()) return;
+      if (janela.isMinimized()) janela.restore();
+      janela.show();
+      janela.focus();
+    });
+
+    n.show();
+  } catch (err) {
+    console.warn('nao consegui notificar', err);
+  }
 });
 
 // --- IPC: area de transferencia ------------------------------------------

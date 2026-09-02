@@ -11,6 +11,12 @@ const preloadOut = {
 };
 
 export default defineConfig({
+  // O tokenizer de mensagem mora em server/src/texto.ts e e importado pelos
+  // DOIS lados - ver o comentario em src/lib/texto.ts. Em dev o Vite serve
+  // modulo por HTTP e recusa caminho fora da raiz do projeto por padrao;
+  // sem isto o `npm run dev` quebra com "outside of Vite serving allow
+  // list". No build nao faz diferenca: la o arquivo so entra no bundle.
+  server: { fs: { allow: ['..'] } },
   build: {
     // O worklet de audio PRECISA virar arquivo, nunca data: URI.
     //

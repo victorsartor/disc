@@ -112,6 +112,27 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_reactions_message ON message_reactions(message_id);
+
+  -- Quem foi mencionado em cada mensagem.
+  --
+  -- Resolvido no SERVIDOR na hora de gravar, e não relido do texto na hora
+  -- de exibir: é isto que decide quem recebe notificação, e essa decisão
+  -- não pode depender de cada cliente reinterpretar a frase do mesmo jeito.
+  -- Um app numa versão mais velha continuaria notificando certo.
+  --
+  -- O "@todos" não tem linha própria: vira uma linha por pessoa (ver
+  -- mencionadosEm). Assim o cliente pergunta sempre a mesma coisa — "meu id
+  -- está aqui?" — em vez de ter um segundo caminho só pro caso do grupo.
+  --
+  -- (Sem crase neste comentário: ele mora dentro de um template literal, e
+  -- uma crase aqui fecha a string no meio do schema.)
+  CREATE TABLE IF NOT EXISTS message_mentions (
+    message_id INTEGER NOT NULL REFERENCES messages(id),
+    user_id    TEXT    NOT NULL REFERENCES users(id),
+    PRIMARY KEY (message_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_mentions_message ON message_mentions(message_id);
 `);
 
 /**
@@ -284,6 +305,11 @@ export interface MessageRow {
   attachments: Attachment[];
   poll: Poll | null;
   reactions: Reaction[];
+  /**
+   * Ids de quem foi mencionado. Resolvido na gravação, nunca relido do
+   * texto na exibição — ver a tabela message_mentions.
+   */
+  mentions: string[];
   /** Quando foi editada, ou null. O cliente desenha "(editado)". */
   edited_at: number | null;
   /** Lápide: o conteúdo já vem vazio, e o cliente desenha "mensagem removida". */
@@ -472,6 +498,21 @@ const stmts = {
     'UPDATE messages SET reply_to_id = NULL WHERE reply_to_id = ?',
   ),
   deleteMessageRow: db.prepare<[number]>('DELETE FROM messages WHERE id = ?'),
+
+  // --- Menções -----------------------------------------------------------
+  mentionsForRecent: db.prepare<[number]>(`
+    SELECT message_id, user_id FROM message_mentions
+     WHERE message_id IN (SELECT id FROM messages ORDER BY id DESC LIMIT ?)
+  `),
+  mentionsOfMessage: db.prepare<[number]>(
+    'SELECT message_id, user_id FROM message_mentions WHERE message_id = ?',
+  ),
+  insertMention: db.prepare<[number, string]>(
+    'INSERT OR IGNORE INTO message_mentions (message_id, user_id) VALUES (?, ?)',
+  ),
+  deleteMentionsOfMessage: db.prepare<[number]>(
+    'DELETE FROM message_mentions WHERE message_id = ?',
+  ),
 
   // --- Anexos ------------------------------------------------------------
   insertAttachment: db.prepare(`
@@ -716,10 +757,15 @@ const inserirMensagem = db.transaction(
     attachmentId: string | null,
     poll: NovaPoll | null,
     replyToId: number | null,
+    mentions: string[],
   ): number => {
     const agora = Date.now();
     const info = stmts.insertMessage.run(userId, body, agora, replyToId);
     const id = Number(info.lastInsertRowid);
+    // Na MESMA transação da mensagem, como a enquete: uma menção gravada
+    // sem a mensagem não notificaria nada, e uma mensagem sem as menções
+    // seria uma notificação que nunca aconteceu e ninguém iria procurar.
+    for (const alvo of mentions) stmts.insertMention.run(id, alvo);
     if (attachmentId) {
       const r = stmts.attachToMessage.run(id, attachmentId, userId);
       if (r.changes === 0) throw new Error('anexo inválido');
@@ -746,8 +792,9 @@ export function saveMessage(
   attachmentId: string | null = null,
   poll: NovaPoll | null = null,
   replyToId: number | null = null,
+  mentions: string[] = [],
 ): number {
-  return inserirMensagem(userId, body, attachmentId, poll, replyToId);
+  return inserirMensagem(userId, body, attachmentId, poll, replyToId, mentions);
 }
 
 /** Quanto da mensagem original cabe no card de citação. */
@@ -802,6 +849,17 @@ interface Lados {
   attachments: Map<number, Attachment[]>;
   polls: Map<number, Poll>;
   reactions: Map<number, Reaction[]>;
+  mentions: Map<number, string[]>;
+}
+
+function agruparMencoes(linhas: { message_id: number; user_id: string }[]): Map<number, string[]> {
+  const porMensagem = new Map<number, string[]>();
+  for (const m of linhas) {
+    const lista = porMensagem.get(m.message_id);
+    if (lista) lista.push(m.user_id);
+    else porMensagem.set(m.message_id, [m.user_id]);
+  }
+  return porMensagem;
 }
 
 /**
@@ -829,6 +887,7 @@ function montarMensagem(b: MensagemBruta, lados: Lados): MessageRow {
       attachments: [],
       poll: null,
       reactions: [],
+      mentions: [],
       edited_at: null,
       deleted: true,
       reply_to: null,
@@ -841,6 +900,7 @@ function montarMensagem(b: MensagemBruta, lados: Lados): MessageRow {
     attachments: lados.attachments.get(b.id) ?? [],
     poll: lados.polls.get(b.id) ?? null,
     reactions: lados.reactions.get(b.id) ?? [],
+    mentions: lados.mentions.get(b.id) ?? [],
     edited_at: b.edited_at,
     deleted: false,
     reply_to: resolverCitacao(b),
@@ -865,6 +925,9 @@ export function messageById(id: number): MessageRow | undefined {
     attachments: new Map(anexos.length > 0 ? [[id, anexos.map(paraAnexo)]] : []),
     polls: new Map(poll ? [[id, poll]] : []),
     reactions: agruparReacoes(stmts.reactionsOfMessage.all(id) as ReactionRow[]),
+    mentions: agruparMencoes(
+      stmts.mentionsOfMessage.all(id) as { message_id: number; user_id: string }[],
+    ),
   });
 }
 
@@ -916,6 +979,9 @@ export function recentMessages(limit = 100): MessageRow[] {
     attachments: porMensagem,
     polls: porMensagemPoll,
     reactions: porMensagemReacao,
+    mentions: agruparMencoes(
+      stmts.mentionsForRecent.all(limit) as { message_id: number; user_id: string }[],
+    ),
   };
   return brutas.map((b) => montarMensagem(b, lados));
 }
@@ -932,9 +998,21 @@ export function messageOwner(id: number): MessageOwner | undefined {
   return stmts.messageOwner.get(id) as MessageOwner | undefined;
 }
 
-export function editMessage(id: number, body: string): void {
-  stmts.updateMessageBody.run(body, Date.now(), id);
-}
+/**
+ * Edita o texto e REFAZ as menções.
+ *
+ * Numa transação porque as duas metades são a mesma edição: se o texto
+ * novo passasse a valer com a lista de menções do texto velho, alguém
+ * continuaria marcado por uma frase que não existe mais — e quem foi
+ * adicionado no meio nunca seria notificado.
+ */
+export const editMessage = db.transaction(
+  (id: number, body: string, mentions: string[]): void => {
+    stmts.updateMessageBody.run(body, Date.now(), id);
+    stmts.deleteMentionsOfMessage.run(id);
+    for (const userId of mentions) stmts.insertMention.run(id, userId);
+  },
+);
 
 /**
  * Vira lápide e entrega os anexos que ficaram sem dono.
@@ -980,6 +1058,7 @@ export const purgeMessage = db.transaction((id: number): string[] => {
   stmts.deletePollVotesOfMessage.run(id);
   stmts.deletePollsOfMessage.run(id);
   stmts.deleteReactionsOfMessage.run(id);
+  stmts.deleteMentionsOfMessage.run(id);
   stmts.clearRepliesTo.run(id);
   stmts.deleteMessageRow.run(id);
 

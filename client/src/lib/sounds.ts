@@ -151,3 +151,50 @@ export const playShareStop = () => efeito(fecharTelaUrl);
 
 /** Mensagem nova no chat, de outra pessoa. */
 export const playNotify = () => efeito(notificacaoUrl);
+
+/**
+ * Voce foi MENCIONADO. Duas notas subindo, sintetizadas.
+ *
+ * Sintetizado em vez de um arquivo novo porque o que importa aqui e ser
+ * DIFERENTE do playNotify, nao ser bonito: se os dois sons se parecessem, a
+ * mencao nao teria ganhado nada sobre a mensagem comum - e o unico jeito de
+ * saber que chamaram voce continuaria sendo olhar a tela.
+ *
+ * Duas notas ascendentes (La 880 -> Mi 1320, uma quinta) sao curtas o
+ * bastante pra nao atrapalhar quem esta na call falando, e o intervalo
+ * ascendente e o que soa como pergunta - que e o que uma mencao geralmente e.
+ */
+export function playMention(): void {
+  if (ganhoEfeitos === 0) return;
+
+  void comContextoAberto(async (ac) => {
+    const notas = [880, 1320];
+    const duracao = 0.12;
+
+    for (let i = 0; i < notas.length; i++) {
+      const osc = ac.createOscillator();
+      const vol = ac.createGain();
+
+      // Senoide: onda quadrada ou dente de serra soariam como alarme de
+      // micro-ondas por cima da voz de alguem.
+      osc.type = 'sine';
+      osc.frequency.value = notas[i];
+
+      const inicio = ac.currentTime + i * duracao;
+      // Envelope curto nos dois lados. Sem ele, ligar e desligar o
+      // oscilador no volume cheio produz um clique - a descontinuidade da
+      // onda vira um estalo bem audivel em fone.
+      vol.gain.setValueAtTime(0, inicio);
+      vol.gain.linearRampToValueAtTime(ganhoEfeitos * 0.22, inicio + 0.012);
+      vol.gain.exponentialRampToValueAtTime(0.0001, inicio + duracao);
+
+      osc.connect(vol).connect(ac.destination);
+      osc.start(inicio);
+      osc.stop(inicio + duracao);
+    }
+
+    // Espera o fim pra que o comContextoAberto so suspenda depois: suspender
+    // no meio cortaria a segunda nota.
+    await new Promise<void>((pronto) => setTimeout(pronto, notas.length * duracao * 1000 + 60));
+  });
+}
