@@ -10,7 +10,7 @@ import {
   readFileSync, writeFileSync, rmSync, existsSync,
   createReadStream, createWriteStream, statSync,
 } from 'node:fs';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
   getSettings, patchSettings, setVolume, setScreenVolume, sanitizePatch,
@@ -437,6 +437,12 @@ ipcMain.handle('api:react-message', (_e, id: unknown, emoji: unknown) =>
     method: 'PUT',
     body: JSON.stringify({ emoji: typeof emoji === 'string' ? emoji : '' }),
   }));
+
+ipcMain.handle('api:mark-read', (_e, messageId: unknown) =>
+  apiFetch('/api/me/read', {
+    method: 'PUT',
+    body: JSON.stringify({ messageId: typeof messageId === 'number' ? messageId : 0 }),
+  }));
 // --- Isolamento de audio no Windows: o addon nativo ----------------------
 /**
  * O addon que captura o som do sistema sem a nossa arvore de processos.
@@ -839,6 +845,34 @@ async function subirArquivo(
   return res.json();
 }
 
+/**
+ * Conta os bytes que passam e avisa o renderer a cada mudanca de percentual.
+ *
+ * So faz sentido pro caminho de ARQUIVO: e ele que faz stream do disco e
+ * pode demorar de verdade num vídeo de 200 MB. A imagem de enviarImagem ja
+ * chega reduzida como Buffer, num upload rapido demais pra render valer.
+ *
+ * O filtro de "so quando o percentual muda" existe porque um arquivo
+ * pequeno tem chunk de 64KB - varios deles caem no mesmo 1%, e mandar um
+ * IPC por chunk seria trafego que a barra nem chegaria a mostrar.
+ */
+function comProgresso(origem: Readable, total: number): Readable {
+  let enviado = 0;
+  let ultimo = -1;
+  const contador = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      enviado += chunk.length;
+      const percent = Math.min(100, Math.round((enviado / total) * 100));
+      if (percent !== ultimo) {
+        ultimo = percent;
+        win?.webContents.send('upload:progress', percent);
+      }
+      cb(null, chunk);
+    },
+  });
+  return origem.pipe(contador);
+}
+
 ipcMain.handle('api:upload-file', async (_e, caminho: unknown) => {
   if (typeof caminho !== 'string' || !caminho) throw new Error('caminho invalido');
 
@@ -850,7 +884,7 @@ ipcMain.handle('api:upload-file', async (_e, caminho: unknown) => {
 
   const nome = basename(caminho);
   return subirArquivo(
-    Readable.toWeb(createReadStream(caminho)) as ReadableStream,
+    Readable.toWeb(comProgresso(createReadStream(caminho), tamanho)) as ReadableStream,
     nome,
     mimeDoNome(nome),
   );

@@ -54,7 +54,15 @@ function mesmoConteudo(a: Message, b: Message): boolean {
 function resumoParaAviso(m: Message): string {
   if (m.body.trim()) return m.body;
   if (m.poll) return `Enquete: ${m.poll.question}`;
-  if (m.attachments?.length) return `Mandou ${m.attachments[0].name}`;
+  // Foto não leva o nome do arquivo nem aqui — pelo mesmo motivo do resumoDe
+  // no Chat: é lixo de câmera, e num balãozinho do sistema ele ocupa a linha
+  // inteira sem dizer nada.
+  const anexo = m.attachments?.[0];
+  if (anexo) {
+    if (anexo.kind === 'image') return 'Mandou uma foto';
+    if (anexo.kind === 'video') return 'Mandou um vídeo';
+    return `Mandou ${anexo.name}`;
+  }
   return 'Mencionou você';
 }
 
@@ -92,6 +100,15 @@ export function App() {
   // passou. Sem isto, entrar num canal com conversa parada tocaria uma
   // notificação pra cada mensagem antiga.
   const historicoCarregadoRef = useRef(false);
+  /**
+   * Onde a linha de "novas mensagens" fica — travado no valor que o
+   * servidor mandou na PRIMEIRA leitura do /api/me desta abertura.
+   *
+   * Ref, e não state: se fosse state, marcar como lida (que atualiza o
+   * mesmo número no servidor) reagiria de volta pra cá e apagaria a linha
+   * embaixo da própria pessoa enquanto ela ainda está lendo.
+   */
+  const unreadAfterIdRef = useRef<number | null>(null);
 
   const addMessage = useCallback((m: Message) => {
     if (seenRef.current.has(m.id)) return;
@@ -355,8 +372,18 @@ export function App() {
 
   useEffect(() => {
     if (!loggedIn) return;
-    window.disc.me().then(setMe).catch(() => setLoggedIn(false));
+    window.disc.me().then((m) => {
+      setMe(m);
+      if (unreadAfterIdRef.current === null) unreadAfterIdRef.current = m.lastReadMessageId;
+    }).catch(() => setLoggedIn(false));
   }, [loggedIn]);
+
+  /** Avança o ponteiro de leitura no servidor. Ver o efeito em Chat.tsx que chama isto. */
+  const marcarLido = useCallback((id: number) => {
+    void window.disc.markRead(id).catch(() => {
+      /* rede caindo: a proxima tentativa (nova mensagem, ou o foco) corrige */
+    });
+  }, []);
 
   // Backend é a fonte da verdade. O data channel só adianta a entrega
   // para quem está na mesma sala de voz — quem está fora recebe aqui.
@@ -567,6 +594,8 @@ export function App() {
           onApagar={apagarMensagem}
           onReagir={reagir}
           onRemoverDeVez={removerDeVez}
+          unreadAfterId={unreadAfterIdRef.current}
+          onLerMensagens={marcarLido}
         />
       </div>
 

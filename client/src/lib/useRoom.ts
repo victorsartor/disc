@@ -6,6 +6,7 @@ import {
   // Classe, nao tipo: o instanceof la embaixo precisa dela em tempo de
   // execucao pra separar audio de video sem cast.
   RemoteAudioTrack,
+  type ConnectionQuality,
   type RemoteTrack,
   type RemoteTrackPublication,
   type RemoteParticipant,
@@ -34,6 +35,8 @@ export interface Peer {
    * geral da voz por cima. O ganho aplicado de verdade esta no AudioFeed.
    */
   volume: number;
+  /** A ligacao desta pessoa com o SFU. 'unknown' ate o primeiro relatorio chegar. */
+  connectionQuality: ConnectionQuality;
 }
 
 export interface ScreenFeed {
@@ -479,6 +482,7 @@ export function useRoom(
     isSharing: p.isScreenShareEnabled,
     isLocal,
     volume: settingsRef.current?.volumes[p.identity] ?? 1,
+    connectionQuality: p.connectionQuality,
   }), []);
 
   const syncPeers = useCallback(() => {
@@ -615,6 +619,7 @@ export function useRoom(
             syncPeers();
           })
           .on(RoomEvent.ActiveSpeakersChanged, syncPeers)
+          .on(RoomEvent.ConnectionQualityChanged, syncPeers)
           .on(RoomEvent.TrackMuted, syncPeers)
           .on(RoomEvent.TrackUnmuted, syncPeers)
           .on(RoomEvent.LocalTrackPublished, syncPeers)

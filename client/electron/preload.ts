@@ -40,6 +40,7 @@ const api = {
   purgeMessage: (id: number) => ipcRenderer.invoke('api:purge-message', id),
   reactMessage: (id: number, emoji: string) =>
     ipcRenderer.invoke('api:react-message', id, emoji),
+  markRead: (messageId: number) => ipcRenderer.invoke('api:mark-read', messageId),
 
   polls: {
     of: (id: number) => ipcRenderer.invoke('api:poll', id),
@@ -90,6 +91,11 @@ const api = {
      * pagina de inventar um caminho pra ler.
      */
     caminhoDe: (file: File): string => webUtils.getPathForFile(file),
+    onProgress: (cb: (percent: number) => void) => {
+      const h = (_e: unknown, percent: number) => cb(percent);
+      ipcRenderer.on('upload:progress', h);
+      return () => ipcRenderer.off('upload:progress', h);
+    },
   },
   roomToken: (channelId: string) => ipcRenderer.invoke('api:room-token', channelId),
   whipConfig: (channelId: string) => ipcRenderer.invoke('api:whip-config', channelId),

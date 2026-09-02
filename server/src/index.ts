@@ -9,7 +9,7 @@ import { registerAuthRoutes, userFromRequest } from './auth.js';
 import {
   recentMessages, saveMessage, touchPresence, setStatus, findUserById,
   findPoll, setVote, messageById, messageOwner, editMessage, deleteMessage,
-  toggleReaction, purgeMessage, allUsers,
+  toggleReaction, purgeMessage, allUsers, lastReadMessageId, markRead,
   type User, type NovaPoll, type MessageRow,
 } from './db.js';
 import { mencionadosEm } from './texto.js';
@@ -95,6 +95,8 @@ app.get('/api/me', async (req, reply) => {
     isAdmin: isAdmin(user),
     // A tirinha de reações vem do servidor pra não existirem duas listas.
     reactionEmojis: REACTION_EMOJIS,
+    // Até onde esta pessoa já leu, nas DUAS máquinas — ver message_reads.
+    lastReadMessageId: lastReadMessageId(user.id),
   };
 });
 
@@ -209,6 +211,28 @@ app.patch('/api/me/status', async (req, reply) => {
 
   setStatus(user.id, status);
   return { status };
+});
+
+/**
+ * Avança o ponteiro de leitura. O corpo é a maior mensagem que o app tem na
+ * tela, não um incremento — mandar o mesmo valor duas vezes dá o mesmo
+ * resultado, e chegar atrasado (a outra máquina já leu mais longe) não
+ * anda pra trás: ver o MAX no setLastRead.
+ */
+app.put('/api/me/read', async (req, reply) => {
+  const user = await requireUser(req, reply);
+  if (!user) return;
+
+  if (!rateLimit(`read:${user.id}`, 30, 10_000)) {
+    return reply.code(429).send({ error: 'devagar aí' });
+  }
+
+  const { messageId } = (req.body ?? {}) as { messageId?: unknown };
+  if (!Number.isInteger(messageId) || (messageId as number) < 0) {
+    return reply.code(400).send({ error: 'id inválido' });
+  }
+
+  return { lastReadMessageId: markRead(user.id, messageId as number) };
 });
 
 /**

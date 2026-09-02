@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Attachment, Message, NovaEnquete, Poll } from '../types';
 import { Avatar } from './Profile';
 import { Anexo, Lightbox, tamanhoLegivel } from './Anexo';
@@ -42,6 +42,20 @@ function mesmoDia(a: number, b: number) {
 /** Teto por arquivo — o mesmo do servidor, avisado antes de subir. */
 const MAX_BYTES = 200 * 1024 * 1024;
 
+/**
+ * Como o anexo preso ao composer se apresenta antes de virar mensagem.
+ *
+ * Foto e vídeo não mostram o nome do arquivo — é gerado pela câmera ou pelo
+ * gravador e não diz nada ("MedalTVLeagueofLegends20260520002422858-trim-
+ * 1779250752194.mp4"). Nos outros o nome fica: é o que deixa perceber que
+ * você anexou o .pdf errado antes de mandar.
+ */
+function rotuloPendente(a: Attachment): string {
+  if (a.kind === 'image') return 'Foto';
+  if (a.kind === 'video') return 'Vídeo';
+  return a.name;
+}
+
 interface Props {
   messages: Message[];
   onSend: (
@@ -79,11 +93,20 @@ interface Props {
   onReagir: (id: number, emoji: string) => Promise<void>;
   /** Segundo estágio: tira a lápide da conversa. Só em mensagem já apagada. */
   onRemoverDeVez: (id: number) => Promise<void>;
+  /**
+   * Onde a linha de "novas mensagens" fica. Vem do servidor, lido uma vez
+   * no carregamento (`me.lastReadMessageId`) — não se move sozinho depois,
+   * é por isso que fica fora do estado deste componente.
+   */
+  unreadAfterId: number | null;
+  /** Avisa o servidor até onde você já leu. Ver o efeito de marcar lido abaixo. */
+  onLerMensagens: (id: number) => void;
 }
 
 export function Chat({
   messages, onSend, onOpenUser, chatVolume, meId, isAdmin, reactionEmojis, gente,
   nomeDe, onApurarPoll, onVotou, onEditar, onApagar, onReagir, onRemoverDeVez,
+  unreadAfterId, onLerMensagens,
 }: Props) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -117,6 +140,8 @@ export function Chat({
   /** Já subiu e está esperando a mensagem que vai carregá-lo. */
   const [pendente, setPendente] = useState<Attachment | null>(null);
   const [subindo, setSubindo] = useState(false);
+  /** 0 a 100. null = sem número ainda (começou agora, ou é o caminho da imagem, que não reporta). */
+  const [progresso, setProgresso] = useState<number | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   /** A imagem aberta em tela cheia. */
   const [ampliada, setAmpliada] = useState<Attachment | null>(null);
@@ -196,6 +221,8 @@ export function Chat({
    * pessoa escreve a legenda — e o servidor recolhe sozinho o que subiu e
    * nunca virou mensagem.
    */
+  useEffect(() => window.disc.arquivos.onProgress(setProgresso), []);
+
   const escolher = async (file: File) => {
     setErro(null);
 
@@ -205,6 +232,14 @@ export function Chat({
     }
 
     setSubindo(true);
+    // Zera o número de uma tentativa anterior — sem isto, um upload de
+    // imagem (que não reporta progresso) herdaria o "87%" do último arquivo.
+    setProgresso(null);
+    // O foco volta pro campo de texto na hora, e não depois que o arquivo
+    // termina de subir: quem escolheu o arquivo pelo botão do clipe está
+    // com o foco NELE, e o Enter não chegava no textarea — era preciso
+    // clicar na legenda antes pra conseguir mandar.
+    inputRef.current?.focus();
     try {
       let r: { attachment: Attachment };
 
@@ -233,6 +268,7 @@ export function Chat({
       setErro('Não consegui enviar esse arquivo.');
     } finally {
       setSubindo(false);
+      setProgresso(null);
     }
   };
 
@@ -290,6 +326,32 @@ export function Chat({
   const marcarGesto = () => {
     gestoRef.current = Date.now();
   };
+
+  /**
+   * Avança o ponteiro de leitura NO SERVIDOR — só quando faz sentido dizer
+   * que a pessoa realmente leu: presa no fim (pinnedRef) E com a janela em
+   * foco. Sem o foco, uma mensagem que chega com o app aberto em segundo
+   * plano marcaria como lida sem ninguém ter olhado pra ela.
+   *
+   * `lidoRef` guarda o maior id já avisado NESTA sessão, pra não repetir o
+   * mesmo PUT a cada volta do polling de 3s quando nada mudou.
+   */
+  const lidoRef = useRef(0);
+  useEffect(() => {
+    const tentar = () => {
+      if (!pinnedRef.current || !document.hasFocus()) return;
+      const maior = messages.length > 0 ? messages[messages.length - 1].id : 0;
+      if (maior > lidoRef.current) {
+        lidoRef.current = maior;
+        onLerMensagens(maior);
+      }
+    };
+    tentar();
+    // Cobre quem estava pinado mas SEM foco quando a mensagem chegou —
+    // ao voltar pro app, o retorno do foco é o gatilho que faltava.
+    window.addEventListener('focus', tentar);
+    return () => window.removeEventListener('focus', tentar);
+  }, [messages, onLerMensagens]);
 
   /**
    * Manter a conversa no fim — observando o TAMANHO da lista, não a
@@ -389,10 +451,42 @@ export function Chat({
     }
   };
 
+  /**
+   * Enter apertado ANTES de o anexo terminar de subir.
+   *
+   * Ref, e não estado: nada na tela depende dele, e ele precisa ser lido
+   * pelo efeito logo abaixo sem entrar numa lista de dependências.
+   */
+  const enviarAoTerminarRef = useRef(false);
+
+  /**
+   * Manda sozinho quando o arquivo chega, se o Enter já tiver sido apertado.
+   *
+   * Só quando o anexo REALMENTE chegou: upload que falhou não vira mensagem
+   * — o erro já está na tela, e mandar um balão vazio por cima dele seria a
+   * segunda coisa errada.
+   *
+   * O `send` fica fora das dependências de propósito: ele se recria a cada
+   * tecla digitada (fecha sobre o `draft`), e entrar aqui faria este efeito
+   * rodar a cada letra. Quem manda o efeito rodar é o anexo chegar.
+   */
+  useEffect(() => {
+    if (!enviarAoTerminarRef.current || subindo) return;
+    enviarAoTerminarRef.current = false;
+    if (pendente) void send();
+  }, [pendente, subindo]);
+
   const send = async () => {
     const text = draft.trim();
+    // Anexo ainda subindo: guarda a intenção em vez de engolir o Enter. Um
+    // vídeo de 200 MB leva segundos, e nesse meio-tempo o Enter não fazia
+    // nada nem dizia por quê.
+    if (subindo) {
+      enviarAoTerminarRef.current = true;
+      return;
+    }
     // Foto sem legenda é normal; balão totalmente vazio não.
-    if ((!text && !pendente) || sending || subindo) return;
+    if ((!text && !pendente) || sending) return;
     setSending(true);
     setErro(null);
     try {
@@ -452,33 +546,47 @@ export function Chat({
               !m.deleted &&
               mesmoDia(anterior.created_at, m.created_at);
 
+            // A linha entra ANTES da primeira mensagem que ficou depois do
+            // ponto onde a pessoa parou de ler — daí exigir que a anterior
+            // ainda esteja dentro do lido.
+            const primeiraNaoLida =
+              unreadAfterId !== null &&
+              m.id > unreadAfterId &&
+              (anterior === undefined || anterior.id <= unreadAfterId);
+
             return (
-              <Balao
-                key={m.id}
-                m={m}
-                seguida={seguida}
-                meId={meId}
-                isAdmin={isAdmin}
-                reactionEmojis={reactionEmojis}
-                gente={gente}
-                chatVolume={chatVolume}
-                destacada={destacada === m.id}
-                registrarRef={(el) => {
-                  if (el) balaoRefs.current.set(m.id, el);
-                  else balaoRefs.current.delete(m.id);
-                }}
-                nomeDe={nomeDe}
-                onOpenUser={onOpenUser}
-                onAmpliar={setAmpliada}
-                onApurarPoll={onApurarPoll}
-                onVotou={onVotou}
-                onResponder={responder}
-                onPularPara={pularPara}
-                onEditar={onEditar}
-                onApagar={apagar}
-                onReagir={reagir}
-                onRemoverDeVez={removerDeVez}
-              />
+              <Fragment key={m.id}>
+                {primeiraNaoLida && (
+                  <div className="chat__novas">
+                    <span>Novas mensagens</span>
+                  </div>
+                )}
+                <Balao
+                  m={m}
+                  seguida={seguida}
+                  meId={meId}
+                  isAdmin={isAdmin}
+                  reactionEmojis={reactionEmojis}
+                  gente={gente}
+                  chatVolume={chatVolume}
+                  destacada={destacada === m.id}
+                  registrarRef={(el) => {
+                    if (el) balaoRefs.current.set(m.id, el);
+                    else balaoRefs.current.delete(m.id);
+                  }}
+                  nomeDe={nomeDe}
+                  onOpenUser={onOpenUser}
+                  onAmpliar={setAmpliada}
+                  onApurarPoll={onApurarPoll}
+                  onVotou={onVotou}
+                  onResponder={responder}
+                  onPularPara={pularPara}
+                  onEditar={onEditar}
+                  onApagar={apagar}
+                  onReagir={reagir}
+                  onRemoverDeVez={removerDeVez}
+                />
+              </Fragment>
             );
           })
         )}
@@ -523,11 +631,23 @@ export function Chat({
         {(pendente || subindo) && (
           <div className="chat__pendente">
             {subindo ? (
-              <span className="chat__pendente-nome">Enviando...</span>
+              <div className="chat__progresso-wrap">
+                <span className="chat__pendente-nome">
+                  {progresso !== null ? `Enviando... ${progresso}%` : 'Enviando...'}
+                </span>
+                {/* Sem barra quando progresso é null: o caminho da imagem
+                    não reporta, e uma barra travada em 0% mentiria mais
+                    que não ter barra nenhuma. */}
+                {progresso !== null && (
+                  <div className="chat__progresso">
+                    <div className="chat__progresso-barra" style={{ width: `${progresso}%` }} />
+                  </div>
+                )}
+              </div>
             ) : (
               <>
-                <span className="chat__pendente-nome" title={pendente!.name}>
-                  {pendente!.name}
+                <span className="chat__pendente-nome" title={rotuloPendente(pendente!)}>
+                  {rotuloPendente(pendente!)}
                 </span>
                 <span className="chat__pendente-tam">{tamanhoLegivel(pendente!.size)}</span>
                 {/* Só tira daqui. Os bytes já subiram, e quem os recolhe é a
@@ -810,7 +930,16 @@ function resumoDe(m: Message): string {
   if (m.deleted) return 'mensagem removida';
   if (m.body.trim()) return m.body;
   if (m.poll) return m.poll.question;
-  if (m.attachments?.length) return m.attachments[0].name;
+  // Foto vira "foto", e não o nome do arquivo: responder a uma imagem
+  // mostrava "IMG-20260830-WA0007.jpg" na barra do composer, que é o mesmo
+  // lixo que a conversa deixou de mostrar. Nos outros o nome ainda ajuda —
+  // é como se distingue um .pdf de outro.
+  const anexo = m.attachments?.[0];
+  if (anexo) {
+    if (anexo.kind === 'image') return 'foto';
+    if (anexo.kind === 'video') return 'vídeo';
+    return anexo.name;
+  }
   return 'mensagem';
 }
 

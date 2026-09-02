@@ -20,6 +20,14 @@ export interface Me {
   isAdmin: boolean;
   /** A tirinha de reações. Vem do servidor pra não haver duas listas. */
   reactionEmojis: string[];
+  /**
+   * Até onde você já leu o chat, na hora em que o app abriu.
+   *
+   * Vem do servidor pra valer nas DUAS máquinas. É lido uma vez só, no
+   * carregamento — é o que ancora a linha de "novas mensagens" num ponto
+   * fixo em vez dela andar sozinha conforme o ponteiro avança.
+   */
+  lastReadMessageId: number;
 }
 
 /**
@@ -359,6 +367,11 @@ export interface DiscApi {
   purgeMessage(id: number): Promise<{ removed: boolean; id: number }>;
   /** Liga/desliga a SUA reação. Mandar duas vezes volta ao estado inicial. */
   reactMessage(id: number, emoji: string): Promise<{ message: Message }>;
+  /**
+   * Avança seu ponteiro de leitura até esta mensagem. Idempotente e sem
+   * risco de andar pra trás — ver o comentário do setLastRead no servidor.
+   */
+  markRead(messageId: number): Promise<{ lastReadMessageId: number }>;
   polls: {
     /**
      * A apuração de agora. Serve o aviso de voto do data channel: quem
@@ -416,6 +429,14 @@ export interface DiscApi {
     baixar(id: string, nome: string): Promise<{ salvo: boolean }>;
     /** Caminho no disco de um File escolhido no seletor. */
     caminhoDe(file: File): string;
+    /**
+     * Progresso do upload em andamento, 0 a 100.
+     *
+     * Só sai pro caminho de ARQUIVO (`enviar`), que é o que faz stream do
+     * disco e pode demorar de verdade — a imagem de `enviarImagem` já
+     * chega reduzida e o upload dela é rápido demais pra valer uma barra.
+     */
+    onProgress(cb: (percent: number) => void): () => void;
   };
   roomToken(channelId: string): Promise<RoomTokenResponse>;
   whipConfig(channelId: string): Promise<WhipConfig>;

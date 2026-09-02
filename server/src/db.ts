@@ -8,6 +8,13 @@ mkdirSync(dirname(config.dbPath), { recursive: true });
 export const db = new Database(config.dbPath);
 db.pragma('journal_mode = WAL');
 
+// Perguntado ANTES do CREATE TABLE IF NOT EXISTS de message_reads, mais
+// abaixo: é o que distingue banco novo de banco que está ganhando a tabela
+// agora, e só o segundo caso precisa do backfill logo depois do exec.
+const messageReadsEraNova = db
+  .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'message_reads'`)
+  .get() === undefined;
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id         TEXT PRIMARY KEY,
@@ -133,7 +140,45 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_mentions_message ON message_mentions(message_id);
+
+  -- Até onde cada pessoa já leu o chat. Uma linha por pessoa, e não uma
+  -- coluna em users: nasceu depois, e teria exigido a mesma migração de
+  -- backfill de um jeito ou de outro.
+  --
+  -- Fica NO SERVIDOR de propósito — quem usa duas máquinas precisa ver a
+  -- mesma marca de "não lida" nas duas, e isso não existe se o ponteiro
+  -- morar só no disco local.
+  CREATE TABLE IF NOT EXISTS message_reads (
+    user_id               TEXT PRIMARY KEY REFERENCES users(id),
+    last_read_message_id  INTEGER NOT NULL DEFAULT 0,
+    updated_at            INTEGER NOT NULL
+  );
 `);
+
+/**
+ * Backfill de quem já tinha conversa: sem isto, todo mundo abriria esta
+ * versão vendo o histórico INTEIRO marcado como não lido, porque a tabela
+ * nasce vazia. Roda uma vez só — na próxima abertura do servidor a tabela
+ * já existe, e `messageReadsEraNova` dá false.
+ *
+ * Gente que se junta DEPOIS desta versão não passa por aqui, e é assim que
+ * tem que ser: pra ela, o histórico inteiro é mesmo novidade.
+ */
+if (messageReadsEraNova) {
+  const maxId = (
+    db.prepare('SELECT COALESCE(MAX(id), 0) AS max FROM messages').get() as { max: number }
+  ).max;
+  if (maxId > 0) {
+    const agora = Date.now();
+    const usuarios = db.prepare('SELECT id FROM users').all() as { id: string }[];
+    const marcar = db.prepare(
+      'INSERT OR IGNORE INTO message_reads (user_id, last_read_message_id, updated_at) VALUES (?, ?, ?)',
+    );
+    db.transaction(() => {
+      for (const u of usuarios) marcar.run(u.id, maxId, agora);
+    })();
+  }
+}
 
 /**
  * Colunas que nasceram depois do primeiro banco.
@@ -577,6 +622,22 @@ const stmts = {
   insertVote: db.prepare(
     'INSERT INTO poll_votes (poll_id, user_id, option_index, created_at) VALUES (?, ?, ?, ?)',
   ),
+
+  // --- Não lida ------------------------------------------------------------
+  getLastRead: db.prepare<[string]>(
+    'SELECT last_read_message_id FROM message_reads WHERE user_id = ?',
+  ),
+  // MAX no UPDATE é o que impede o ponteiro de ANDAR PRA TRÁS: as duas
+  // máquinas mandam a maior mensagem que cada uma viu na hora, e chegar fora
+  // de ordem (a mais velha depois da mais nova) não pode apagar o progresso
+  // que a outra já tinha marcado.
+  setLastRead: db.prepare(`
+    INSERT INTO message_reads (user_id, last_read_message_id, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      last_read_message_id = MAX(last_read_message_id, excluded.last_read_message_id),
+      updated_at = excluded.updated_at
+  `),
 };
 
 /**
@@ -1106,4 +1167,16 @@ export function setStatus(userId: string, status: StatusEscolhido): User {
 
 export function allUsers(): User[] {
   return stmts.todos.all() as User[];
+}
+
+/** 0 = nunca leu nada — o histórico inteiro aparece como não lido. */
+export function lastReadMessageId(userId: string): number {
+  const row = stmts.getLastRead.get(userId) as { last_read_message_id: number } | undefined;
+  return row?.last_read_message_id ?? 0;
+}
+
+/** Devolve o ponteiro já resolvido — pode não ser `messageId` se outra máquina leu mais longe. */
+export function markRead(userId: string, messageId: number): number {
+  stmts.setLastRead.run(userId, messageId, Date.now());
+  return lastReadMessageId(userId);
 }

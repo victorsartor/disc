@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ConnectionQuality } from 'livekit-client';
 import type {
   Channel, Me, Presence, StatusEfetivo, StatusEscolhido, UserPresence,
 } from '../types';
@@ -29,6 +30,34 @@ interface Row {
   isLocal: boolean;
   volume: number;
   live: boolean;
+  connectionQuality: ConnectionQuality;
+}
+
+/**
+ * Cor da bolinha de qualidade, ou null quando não vale mostrar.
+ *
+ * 'unknown' fica sem bolinha de propósito: é o estado de quem acabou de
+ * entrar, antes do primeiro relatório do SFU chegar, e uma bolinha cinza ali
+ * pareceria um alarme sem motivo.
+ */
+function corQualidade(q: ConnectionQuality): string | null {
+  switch (q) {
+    case ConnectionQuality.Excellent: return 'var(--ok)';
+    case ConnectionQuality.Good: return 'var(--live)';
+    case ConnectionQuality.Poor:
+    case ConnectionQuality.Lost: return 'var(--danger)';
+    default: return null;
+  }
+}
+
+function tituloQualidade(q: ConnectionQuality): string {
+  switch (q) {
+    case ConnectionQuality.Excellent: return 'Conexão ótima';
+    case ConnectionQuality.Good: return 'Conexão boa';
+    case ConnectionQuality.Poor: return 'Conexão ruim';
+    case ConnectionQuality.Lost: return 'Conexão perdida';
+    default: return '';
+  }
 }
 
 /** Rótulo e cor de cada status, num lugar só. */
@@ -113,6 +142,9 @@ export function Sidebar({
                 isLocal: false,
                 volume: 1,
                 live: false,
+                // Qualidade so existe pra quem esta NA sua sala: fora dela
+                // nao ha conexao ao SFU pra medir.
+                connectionQuality: ConnectionQuality.Unknown,
               }));
 
           return (
@@ -375,7 +407,18 @@ function MemberRow({
           setOpen((v) => !v);
         }}
       >
-        <Avatar url={row.avatarUrl} name={row.name} size={24} className="member__avatar" />
+        <span className="member__foto">
+          <Avatar url={row.avatarUrl} name={row.name} size={24} className="member__avatar" />
+          {/* So em quem esta AO VIVO na sua sala: fora dela nao existe
+              conexao ao SFU pra medir, e 'unknown' ja sai sem cor. */}
+          {row.live && corQualidade(row.connectionQuality) && (
+            <span
+              className="bolinha bolinha--borda"
+              title={tituloQualidade(row.connectionQuality)}
+              style={{ background: corQualidade(row.connectionQuality)! }}
+            />
+          )}
+        </span>
         <span className="member__name">{row.name}</span>
         {row.isSharing && <span className="member__tag member__tag--live">AO VIVO</span>}
         {row.isMuted && (

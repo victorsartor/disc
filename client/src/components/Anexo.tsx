@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Attachment } from '../types';
-import { IconBaixar, IconArquivo } from './Icons';
+import { IconBaixar, IconArquivo, IconClose } from './Icons';
 
 /**
  * Como cada anexo aparece na conversa.
@@ -34,9 +34,16 @@ export function Anexo({ anexo, chatVolume, onAmpliar }: Props) {
       <button
         className="anexo anexo--imagem"
         onClick={() => onAmpliar(anexo)}
-        title={`${anexo.name} — clique para ampliar`}
+        title="Clique para ampliar"
       >
-        <img className="anexo__img" src={anexo.url} alt={anexo.name} loading="lazy" />
+        {/* O nome do arquivo não aparece em lugar nenhum de uma FOTO — nem
+            no alt, nem no title, nem na barra do lightbox. Nome de foto é
+            quase sempre lixo de câmera ou de print ("IMG-20260830-WA0007",
+            "Captura de tela 2026-08-30 143512"), às vezes com o acento já
+            estropiado pelo caminho, e não diz nada que a própria imagem não
+            diga melhor. O alt genérico importa por um motivo a mais: é ele
+            que vira TEXTO na tela quando a imagem não carrega. */}
+        <img className="anexo__img" src={anexo.url} alt="Imagem" loading="lazy" />
       </button>
     );
   }
@@ -66,6 +73,10 @@ function AnexoVideo({ anexo, volume }: { anexo: Attachment; volume: number }) {
           servidor responde Range desde os áudios.
 
           playsInline pro vídeo tocar no lugar dele, e não tomar a tela. */}
+      {/* Sem o nome do arquivo, pelo mesmo motivo da foto: nome de clipe de
+          jogo é gerado pelo gravador ("MedalTVMarvelRivals20260803195209909
+          -trim-1785797706..."), ocupa duas linhas e não diz nada que o
+          próprio vídeo não diga. Continua indo pro arquivo salvo ao baixar. */}
       <video
         ref={ref}
         className="anexo__video"
@@ -74,7 +85,6 @@ function AnexoVideo({ anexo, volume }: { anexo: Attachment; volume: number }) {
         preload="metadata"
         playsInline
       />
-      <span className="anexo__nome" title={anexo.name}>{anexo.name}</span>
     </div>
   );
 }
@@ -142,38 +152,90 @@ function AnexoArquivo({ anexo }: { anexo: Attachment }) {
 /**
  * Imagem em tela cheia.
  *
- * Fecha no Esc, no clique no fundo e no botão — três saídas porque é uma
- * camada que cobre tudo, e ficar preso nela é o pior que pode acontecer.
+ * Fecha no Esc, no clique no fundo e no X do canto — três saídas porque é
+ * uma camada que cobre tudo, e ficar preso nela é o pior que pode
+ * acontecer.
+ *
+ * Baixar saiu da barra de cima e virou botão direito na imagem. A barra
+ * nascia em cima da faixa de arrastar da janela, e o clique NUNCA chegava
+ * nos botões — nem no "Baixar", nem no "Fechar" (ver .lightbox no
+ * theme.css). Menos coisa na frente da foto, e a saída num lugar só.
  */
 export function Lightbox({ anexo, onFechar }: { anexo: Attachment; onFechar: () => void }) {
+  /** Onde desenhar o menu do botão direito. null = sem menu aberto. */
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onFechar();
+    // O Esc tira uma camada por vez: primeiro o menu, depois a imagem.
+    // Fechar as duas de uma vez faria a foto sumir de quem só desistiu do
+    // menu.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (menu) setMenu(null);
+      else onFechar();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onFechar]);
+  }, [onFechar, menu]);
+
+  // Nasce no cursor, mas é empurrado pra dentro da tela se não couber.
+  // Medido depois de existir porque a largura vem do CSS e do texto, não
+  // daqui; o useLayoutEffect corrige antes de pintar, sem piscar no lugar
+  // errado.
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!menu || !el) return;
+    const { width, height } = el.getBoundingClientRect();
+    el.style.left = `${Math.max(8, Math.min(menu.x, window.innerWidth - width - 8))}px`;
+    el.style.top = `${Math.max(8, Math.min(menu.y, window.innerHeight - height - 8))}px`;
+  }, [menu]);
 
   return (
     <div className="lightbox" onClick={onFechar}>
-      <div className="lightbox__barra">
-        <span className="lightbox__nome">{anexo.name}</span>
-        <button
-          className="lightbox__acao"
-          onClick={(e) => {
-            e.stopPropagation();
-            void window.disc.arquivos.baixar(anexo.id, anexo.name);
-          }}
-        >
-          Baixar
-        </button>
-        <button className="lightbox__acao" onClick={onFechar}>Fechar</button>
-      </div>
-      {/* Para o clique de fechar do fundo: clicar NA imagem não fecha. */}
+      <button className="lightbox__x" onClick={onFechar} title="Fechar (Esc)">
+        <IconClose size={18} />
+      </button>
+
+      {/* Para o clique de fechar do fundo: clicar NA imagem não fecha.
+          O title é o único aviso de que o botão direito baixa — sem ele o
+          jeito de salvar a foto não existe em lugar nenhum da tela. */}
       <img
         className="lightbox__img"
         src={anexo.url}
-        alt={anexo.name}
-        onClick={(e) => e.stopPropagation()}
+        alt="Imagem"
+        title="Botão direito para baixar"
+        onClick={(e) => {
+          e.stopPropagation();
+          setMenu(null);
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu({ x: e.clientX, y: e.clientY });
+        }}
       />
+
+      {menu && (
+        <div
+          className="lightbox__menu"
+          ref={menuRef}
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* O nome do arquivo continua indo pro `baixar` e nomeando o que
+              se salva — some da tela, não do arquivo. */}
+          <button
+            className="lightbox__menu-item"
+            onClick={() => {
+              setMenu(null);
+              void window.disc.arquivos.baixar(anexo.id, anexo.name);
+            }}
+          >
+            <IconBaixar size={14} />
+            Baixar imagem
+          </button>
+        </div>
+      )}
     </div>
   );
 }

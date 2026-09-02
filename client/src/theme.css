@@ -1278,6 +1278,54 @@ textarea {
   color: var(--danger);
 }
 
+/* Barra de progresso do upload. Mora dentro do mesmo .chat__pendente que já
+   existia pro "Enviando..." — só troca o conteúdo enquanto sobe. */
+.chat__progresso-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat__progresso {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--level-1);
+  overflow: hidden;
+}
+
+.chat__progresso-barra {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.15s ease-out;
+}
+
+/* Linha de "novas mensagens": onde a pessoa parou de ler da última vez que
+   abriu o app, calculada uma vez no carregamento (ver lastReadMessageId em
+   types.ts) e fixa ali — não persegue o ponteiro conforme ele avança. */
+.chat__novas {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 6px;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat__novas::before,
+.chat__novas::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--danger);
+  opacity: 0.35;
+}
+
 .chat__erro {
   margin-bottom: 8px;
   padding: 8px 10px;
@@ -1652,39 +1700,67 @@ textarea {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
   padding: 24px;
   background: rgba(10, 21, 33, 0.92);
   backdrop-filter: blur(4px);
+  /* Sem este no-drag os 52px de cima do lightbox não respondem a clique
+     nenhum. A .topbar ali atrás é faixa de arrastar a janela, e o Chromium
+     monta essa região somando RETÂNGULOS de drag e subtraindo os de
+     no-drag — quem está por cima com app-region nenhum não subtrai nada.
+     Estar na frente e com z-index maior não basta: era isso que engolia o
+     clique nos botões que moravam no topo. */
+  -webkit-app-region: no-drag;
 }
 
-.lightbox__barra {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: 100%;
-}
-
-.lightbox__nome {
-  font-size: 13px;
-  color: var(--lavender);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lightbox__acao {
-  padding: 6px 12px;
+/* A única saída visível. As outras duas (Esc e clique no fundo) não
+   ocupam espaço na frente da foto. */
+.lightbox__x {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius);
   background: var(--glass);
+  color: var(--lavender);
+  transition: background 0.13s, color 0.13s;
+}
+
+.lightbox__x:hover {
+  background: var(--level-3);
+  color: var(--alabaster);
+}
+
+/* Menu do botão direito. Fixed porque o left/top vêm do cursor, em
+   coordenadas de tela. */
+.lightbox__menu {
+  position: fixed;
+  padding: 4px;
+  background: var(--level-3);
+  background-image: linear-gradient(var(--glass), var(--glass));
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.lightbox__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: var(--radius);
   color: var(--alabaster);
   font-size: 13px;
-  flex-shrink: 0;
+  white-space: nowrap;
   transition: background 0.13s;
 }
 
-.lightbox__acao:hover {
-  background: var(--level-3);
+.lightbox__menu-item:hover {
+  background: var(--glass);
 }
 
 .lightbox__img {
