@@ -139,6 +139,9 @@ const api = {
       ipcRenderer.invoke('settings:set-volume', identity, volume),
     setScreenVolume: (identity: string, volume: number) =>
       ipcRenderer.invoke('settings:set-screen-volume', identity, volume),
+    /** A funcao que ja ocupa esta tecla ('ptt', uma acao, ou null). */
+    keyInUse: (keycode: number, exceto?: string) =>
+      ipcRenderer.invoke('settings:key-in-use', keycode, exceto),
   },
 
   overlay: {
@@ -156,6 +159,16 @@ const api = {
     const h = (_e: unknown, down: boolean) => cb(down);
     ipcRenderer.on('ptt:state', h);
     return () => ipcRenderer.off('ptt:state', h);
+  },
+
+  /**
+   * Atalho global apertado. Chega so o NOME da acao ('mudo', 'surdo') - quem
+   * decide o que ela faz e este lado, que e onde o estado do microfone mora.
+   */
+  onAtalho: (cb: (acao: string) => void) => {
+    const h = (_e: unknown, acao: string) => cb(acao);
+    ipcRenderer.on('atalho:acionado', h);
+    return () => ipcRenderer.off('atalho:acionado', h);
   },
 };
 

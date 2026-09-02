@@ -37,10 +37,13 @@ export function createOverlay(): BrowserWindow {
     show: false,
     hasShadow: false,
     webPreferences: {
-      preload: join(__dirname, 'overlay-preload.mjs'),
+      preload: join(__dirname, 'overlay-preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      // Ver o comentario da janela principal (main.ts). Esta janela sobe
+      // junto: deixar UMA das duas fora do sandbox nao serve de meio termo,
+      // e as duas rodam o mesmo Chromium.
+      sandbox: true,
     },
   });
 

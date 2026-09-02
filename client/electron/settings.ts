@@ -95,11 +95,41 @@ export interface Settings {
    * regra e colapsaria a coluna pra zero.
    */
   sidebarWidth: number;
+  /**
+   * Atalhos globais por acao. Ausente = aquela acao nao tem tecla.
+   *
+   * Mapa, e nao dois campos soltos por acao como o pttKeycode/pttKeyLabel:
+   * sao duas acoes hoje e a lista deve crescer, e um par de campos novos por
+   * acao espalharia a mesma regra por ALLOWED_KEYS, DEFAULTS e sanitize toda
+   * vez. Aqui a acao nova custa uma string em ACOES_DE_ATALHO.
+   */
+  atalhos: Partial<Record<AcaoDeAtalho, Atalho>>;
 }
 
 /** Ver o comentario do sidebarWidth. Repetidos no CSS como var(--sidebar-w). */
 export const LARGURA_MIN = 180;
 export const LARGURA_MAX = 480;
+
+/**
+ * As acoes que aceitam atalho global, em lista FECHADA.
+ *
+ * Mesma decisao dos emoji de reacao na 0.31: a chave chega por IPC, e aceitar
+ * qualquer string faria o settings.json virar deposito de qualquer coisa.
+ * Acao que nao estiver aqui e descartada no patch.
+ *
+ * Escolhidas com ele em 02/09/2026. Ficaram de fora "sair do canal" (sair da
+ * call sem querer por causa de uma tecla mal escolhida e pior que o atalho
+ * economiza) e o overlay, que ja tem botao proprio.
+ */
+export const ACOES_DE_ATALHO = ['mudo', 'surdo'] as const;
+export type AcaoDeAtalho = (typeof ACOES_DE_ATALHO)[number];
+
+export interface Atalho {
+  /** Keycode do uiohook, o mesmo vocabulario do pttKeycode. */
+  keycode: number;
+  /** Como mostrar na tela ("Ctrl esq.", "F9", "Ç"). */
+  label: string;
+}
 
 const DEFAULTS: Settings = {
   voiceMode: 'vad',
@@ -135,6 +165,7 @@ const DEFAULTS: Settings = {
   themeBar: '#1b263b',
   themeSymbol: '#e0e1dd',
   sidebarWidth: 240,
+  atalhos: {},
 };
 
 let cache: Settings | null = null;
@@ -146,6 +177,35 @@ function percentual(v: unknown, padrao: number): number {
   const n = Number(v);
   if (!Number.isFinite(n)) return padrao;
   return Math.min(100, Math.max(0, Math.round(n)));
+}
+
+/**
+ * So os atalhos bem formados, com acao conhecida. Usada na leitura e no patch.
+ *
+ * Peneira em vez de rejeitar o mapa inteiro: um atalho estragado (por edicao a
+ * mao ou por uma acao que existiu numa versao futura) nao pode custar os
+ * outros, que estao bons.
+ */
+function atalhos(v: unknown): Partial<Record<AcaoDeAtalho, Atalho>> {
+  if (typeof v !== 'object' || v === null) return {};
+  const out: Partial<Record<AcaoDeAtalho, Atalho>> = {};
+  for (const [acao, bind] of Object.entries(v)) {
+    if (!(ACOES_DE_ATALHO as readonly string[]).includes(acao)) continue;
+    if (typeof bind !== 'object' || bind === null) continue;
+    const { keycode, label } = bind as { keycode?: unknown; label?: unknown };
+    // Keycode e indice de tecla, nao numero qualquer: um float ou um negativo
+    // nunca casaria com um evento do uiohook e ficaria como atalho fantasma,
+    // ocupando a tecla na tela sem nunca disparar.
+    if (!Number.isInteger(keycode) || (keycode as number) < 0) continue;
+    if (typeof label !== 'string' || !label.trim()) continue;
+    out[acao as AcaoDeAtalho] = {
+      keycode: keycode as number,
+      // O rotulo so e desenhado, mas 40 caracteres ja e mais que qualquer
+      // nome de tecla - o resto seria lixo entrando pelo IPC.
+      label: label.trim().slice(0, 40),
+    };
+  }
+  return out;
 }
 
 /** Uma largura dentro dos limites, ou o padrao. Usada na leitura e no patch. */
@@ -195,6 +255,10 @@ export function getSettings(): Settings {
       // Pelo mesmo motivo das cores: vai virar grid-template-columns, e um
       // valor invalido ali colapsa a barra lateral inteira.
       sidebarWidth: largura(raw.sidebarWidth, DEFAULTS.sidebarWidth),
+      // Mapa, entao pelo mesmo motivo do volumes/screenVolumes acima: o
+      // spread copiaria a referencia do JSON lido, e um settings.json de
+      // antes da 0.36 deixaria o campo undefined em vez do objeto vazio.
+      atalhos: atalhos(raw.atalhos),
     };
   } catch {
     next = { ...DEFAULTS };
@@ -216,7 +280,7 @@ const ALLOWED_KEYS = new Set<keyof Settings>([
   'voiceVolume', 'effectsVolume', 'chatVolume',
   'screenAudioDeviceId', 'isolarAudioNaTela',
   'overlayEnabled', 'overlayX', 'overlayY', 'theme',
-  'themeBg', 'themeBar', 'themeSymbol', 'sidebarWidth',
+  'themeBg', 'themeBar', 'themeSymbol', 'sidebarWidth', 'atalhos',
 ]);
 
 /**
@@ -264,6 +328,13 @@ export function sanitizePatch(input: unknown): Partial<Settings> {
     if (k === 'sidebarWidth') {
       if (!Number.isFinite(Number(v))) continue;
       out[k] = largura(v, DEFAULTS.sidebarWidth);
+      continue;
+    }
+    // O patch de atalhos e SUBSTITUICAO do mapa inteiro, nao merge por acao:
+    // e assim que "tirar a tecla desta acao" tem como ser dito. Um merge
+    // deixaria o campo ausente significar "nao mexe", e nunca "apaga".
+    if (k === 'atalhos') {
+      out[k] = atalhos(v);
       continue;
     }
     out[k] = v;

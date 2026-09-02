@@ -1337,6 +1337,17 @@ export function useRoom(
   // --- Push-to-talk ------------------------------------------------------
   useEffect(() => window.disc.onPushToTalk(setPttDown), []);
 
+  // --- Atalhos globais ---------------------------------------------------
+  // O main manda so o nome da acao; quem alterna e aqui, onde o estado do
+  // microfone mora. Reusa os MESMOS toggles dos botoes - inclusive a regra
+  // de que abrir o mic ensurdecido desfaz o surdo junto (ver toggleMic).
+  // Um caminho separado pro atalho seria uma segunda definicao de "mudo",
+  // e as duas divergiriam na primeira mudanca de regra.
+  useEffect(() => window.disc.onAtalho((acao) => {
+    if (acao === 'mudo') toggleMic();
+    else if (acao === 'surdo') toggleDeafen();
+  }), [toggleMic, toggleDeafen]);
+
   // Desconecta limpo ao fechar o app
   useEffect(() => () => void roomRef.current?.disconnect(), []);
 

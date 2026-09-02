@@ -233,11 +233,26 @@ export interface WhipConfig {
 
 export type VoiceMode = 'vad' | 'ptt';
 
-/** Tecla do push-to-talk: keycode do uiohook + como mostrar na tela. */
+/** Tecla vinculada: keycode do uiohook + como mostrar na tela. */
 export interface KeyBinding {
   keycode: number;
   label: string;
 }
+
+/**
+ * As ações que aceitam atalho global.
+ *
+ * Espelha ACOES_DE_ATALHO em electron/settings.ts, que é quem manda — o
+ * `satisfies` logo abaixo é o que impede as duas listas de divergirem em
+ * silêncio: acrescentar uma ação lá sem descrever aqui não compila.
+ */
+export type AcaoDeAtalho = 'mudo' | 'surdo';
+
+/** Como cada ação se chama na tela das configurações. */
+export const ROTULO_DA_ACAO = {
+  mudo: 'Mudo do microfone',
+  surdo: 'Surdo',
+} satisfies Record<AcaoDeAtalho, string>;
 
 export interface Settings {
   voiceMode: VoiceMode;
@@ -310,6 +325,14 @@ export interface Settings {
    * e são reaplicados lá: o que sai daqui é pedido, não verdade.
    */
   sidebarWidth: number;
+  /**
+   * Atalhos globais por ação. Ação ausente = sem tecla vinculada.
+   *
+   * A lista fechada de ações vive em electron/settings.ts; o que não estiver
+   * nela é descartado no patch. Patch aqui é SUBSTITUIÇÃO do mapa inteiro,
+   * não merge — é assim que dá pra dizer "tira a tecla desta ação".
+   */
+  atalhos: Partial<Record<AcaoDeAtalho, KeyBinding>>;
   /** Falso em Wayland e onde o hook global de teclado nao sobe. */
   pttAvailable: boolean;
 }
@@ -486,6 +509,15 @@ export interface DiscApi {
     resolveKey(code: string, printable?: string): Promise<KeyBinding | null>;
     setVolume(identity: string, volume: number): Promise<void>;
     setScreenVolume(identity: string, volume: number): Promise<void>;
+    /**
+     * A função que já ocupa esta tecla, ou null se estiver livre.
+     *
+     * Quem sabe é o main, que é dono do settings.json — conferir aqui seria
+     * uma segunda cópia da regra, e as duas discordariam na primeira ação
+     * nova. `exceto` deixa a ação que está sendo re-vinculada fora da
+     * checagem, senão trocar a tecla dela por ela mesma acusaria conflito.
+     */
+    keyInUse(keycode: number, exceto?: AcaoDeAtalho): Promise<AcaoDeAtalho | 'ptt' | null>;
   };
   overlay: {
     toggle(): Promise<boolean>;
@@ -493,6 +525,14 @@ export interface DiscApi {
     onEnabled(cb: (enabled: boolean) => void): () => void;
   };
   onPushToTalk(cb: (down: boolean) => void): () => void;
+  /**
+   * Atalho global apertado — chega só o NOME da ação.
+   *
+   * O main não manda "desligue o microfone" porque ele teria que saber se o
+   * mic já está ligado, e esse estado mora aqui. Ele avisa que a tecla foi
+   * apertada; quem alterna é este lado.
+   */
+  onAtalho(cb: (acao: AcaoDeAtalho) => void): () => void;
 }
 
 declare global {

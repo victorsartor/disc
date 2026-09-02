@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { KeyBinding, Settings as SettingsType } from '../types';
+import type { AcaoDeAtalho, KeyBinding, Settings as SettingsType } from '../types';
+import { ROTULO_DA_ACAO } from '../types';
 import { Select } from './Select';
 
 interface Props {
@@ -67,11 +68,28 @@ function VolumeRow({
 /** Depois desse tempo sem tecla nenhuma, a captura desiste sozinha. */
 const CAPTURE_TIMEOUT = 15000;
 
+/**
+ * O que esta esperando tecla: o apertar-para-falar ou uma das acoes.
+ *
+ * Um alvo so, e nao um booleano por linha: sao tres botoes de tecla na tela
+ * agora, e so um pode estar escutando por vez - com um booleano cada, dois
+ * capturando ao mesmo tempo seria um estado possivel, e a primeira tecla
+ * apertada iria parar nos dois.
+ */
+type Alvo = 'ptt' | AcaoDeAtalho;
+
+/** Como cada funcao se chama numa frase de conflito. */
+function nomeDoAlvo(alvo: Alvo): string {
+  return alvo === 'ptt' ? 'apertar para falar' : ROTULO_DA_ACAO[alvo].toLowerCase();
+}
+
 export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
   const [speakers, setSpeakers] = useState<MediaDeviceInfo[]>([]);
-  const [capturing, setCapturing] = useState(false);
-  const [justBound, setJustBound] = useState(false);
+  const [capturing, setCapturing] = useState<Alvo | null>(null);
+  const [justBound, setJustBound] = useState<Alvo | null>(null);
+  /** Mensagem de "essa tecla ja e do X", quando a vinculacao e recusada. */
+  const [conflito, setConflito] = useState<string | null>(null);
   const [nivel, setNivel] = useState<number | null>(null);
   const [versao, setVersao] = useState<string | null>(null);
 
@@ -100,6 +118,12 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
   const patchRef = useRef(onPatch);
   patchRef.current = onPatch;
 
+  // Pelo mesmo motivo: o mapa de atalhos e lido na hora de GRAVAR um atalho
+  // novo (pra preservar os outros), e nao pode entrar nas dependencias do
+  // efeito de captura - qualquer patch no meio dela a reiniciaria.
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -123,7 +147,7 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
   }, [onClose, capturing]);
 
   /**
-   * Captura da tecla do push-to-talk.
+   * Captura de tecla, para o push-to-talk e para os atalhos.
    *
    * Caminho principal: keydown do DOM. Enquanto a janela tem foco - que e o
    * caso logo depois do clique no botao - ele dispara para tudo, e o
@@ -136,6 +160,7 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
    */
   useEffect(() => {
     if (!capturing) return;
+    const alvo = capturing;
     let done = false;
 
     const finish = async (bind: KeyBinding | null) => {
@@ -143,11 +168,33 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
       done = true;
       void window.disc.settings.cancelKeyCapture();
       if (bind) {
-        await patchRef.current({ pttKeycode: bind.keycode, pttKeyLabel: bind.label });
-        setJustBound(true);
-        window.setTimeout(() => setJustBound(false), 1600);
+        // Quem confere e o main, dono do settings.json. Recusar aqui em vez
+        // de gravar evita o pior caso: a mesma tecla em duas funcoes dispara
+        // as duas, e ninguem entende por que mutar tambem ensurdece.
+        const ocupada = await window.disc.settings.keyInUse(
+          bind.keycode,
+          alvo === 'ptt' ? undefined : alvo,
+        );
+        if (ocupada && ocupada !== alvo) {
+          setConflito(`${bind.label} já está em uso: ${nomeDoAlvo(ocupada)}.`);
+          window.setTimeout(() => setConflito(null), 3200);
+          setCapturing(null);
+          return;
+        }
+
+        if (alvo === 'ptt') {
+          await patchRef.current({ pttKeycode: bind.keycode, pttKeyLabel: bind.label });
+        } else {
+          // Substituicao do mapa inteiro, nao merge - e assim que o main
+          // entende "tira a tecla desta acao". Ver o sanitize em settings.ts.
+          await patchRef.current({
+            atalhos: { ...settingsRef.current.atalhos, [alvo]: bind },
+          });
+        }
+        setJustBound(alvo);
+        window.setTimeout(() => setJustBound(null), 1600);
       }
-      setCapturing(false);
+      setCapturing(null);
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -159,8 +206,9 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
         void finish(null);
         return;
       }
-      // Tecla que o hook global nao enxerga nao serve pra PTT: ignora e
-      // continua escutando, em vez de vincular algo que nunca ia funcionar.
+      // Tecla que o hook global nao enxerga nao serve nem pra PTT nem pra
+      // atalho: ignora e continua escutando, em vez de vincular algo que
+      // nunca ia funcionar.
       void window.disc.settings
         .resolveKey(e.code, e.key)
         .then((bind) => bind && finish(bind));
@@ -259,12 +307,12 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
                 <div className="settings__row">
                   <span className="settings__label">Tecla</span>
                   <button
-                    className={`keybind${capturing ? ' keybind--listening' : ''}${
-                      justBound ? ' keybind--bound' : ''
+                    className={`keybind${capturing === 'ptt' ? ' keybind--listening' : ''}${
+                      justBound === 'ptt' ? ' keybind--bound' : ''
                     }`}
-                    onClick={() => setCapturing((v) => !v)}
+                    onClick={() => setCapturing((v) => (v === 'ptt' ? null : 'ptt'))}
                   >
-                    {capturing ? (
+                    {capturing === 'ptt' ? (
                       <>
                         <span className="keybind__pulse" />
                         Aperte qualquer tecla
@@ -281,15 +329,81 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
                 </div>
 
                 <p className="settings__hint">
-                  {capturing
+                  {capturing === 'ptt'
                     ? 'Escutando... aperte Esc ou clique de novo para cancelar.'
-                    : justBound
+                    : justBound === 'ptt'
                       ? 'Tecla salva.'
                       : 'Segure essa tecla para falar, mesmo com o jogo em foco.'}
                 </p>
               </>
             )}
           </section>
+
+          {/* Atalhos globais (0.36). Escondidos onde o hook de teclado nao
+              sobe - em Wayland eles nunca disparariam, e um botao que grava
+              uma tecla que nunca funciona e pior que nenhum botao. */}
+          {settings.pttAvailable && (
+            <section className="settings__group">
+              <h3 className="settings__title">Atalhos</h3>
+
+              {(Object.keys(ROTULO_DA_ACAO) as AcaoDeAtalho[]).map((acao) => {
+                const bind = settings.atalhos[acao];
+                return (
+                  <div className="settings__row" key={acao}>
+                    <span className="settings__label">{ROTULO_DA_ACAO[acao]}</span>
+                    <div className="keybind__grupo">
+                      <button
+                        className={`keybind${capturing === acao ? ' keybind--listening' : ''}${
+                          justBound === acao ? ' keybind--bound' : ''
+                        }`}
+                        onClick={() => setCapturing((v) => (v === acao ? null : acao))}
+                      >
+                        {capturing === acao ? (
+                          <>
+                            <span className="keybind__pulse" />
+                            Aperte qualquer tecla
+                          </>
+                        ) : bind ? (
+                          <>
+                            <kbd className="keybind__key">{bind.label}</kbd>
+                            <span className="keybind__hint">trocar</span>
+                          </>
+                        ) : (
+                          'Clique para definir'
+                        )}
+                      </button>
+                      {/* Tirar a tecla precisa de um caminho proprio: sem
+                          isto, quem vinculou sem querer nao teria como
+                          desvincular - so trocar por outra. */}
+                      {bind && capturing !== acao && (
+                        <button
+                          className="keybind__limpar"
+                          title={`Tirar o atalho de ${ROTULO_DA_ACAO[acao].toLowerCase()}`}
+                          onClick={() => {
+                            const resto = { ...settings.atalhos };
+                            delete resto[acao];
+                            void onPatch({ atalhos: resto });
+                          }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              <p className="settings__hint">
+                {conflito
+                  ? conflito
+                  : capturing && capturing !== 'ptt'
+                    ? 'Escutando... aperte Esc ou clique de novo para cancelar.'
+                    : justBound && justBound !== 'ptt'
+                      ? 'Tecla salva.'
+                      : 'Funcionam com o jogo em foco. Uma tecla por função — a mesma tecla não serve pra duas.'}
+              </p>
+            </section>
+          )}
 
           <section className="settings__group">
             <h3 className="settings__title">Sensibilidade do microfone</h3>

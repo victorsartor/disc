@@ -2427,7 +2427,38 @@ textarea {
   font-size: 12px;
 }
 
-/* ── Captura de tecla do push-to-talk ────────────────────────────────── */
+/* ── Captura de tecla: push-to-talk e atalhos ────────────────────────────
+   O botao encolhe quando divide a linha com o × de limpar, senao a linha do
+   atalho ficaria mais larga que a do PTT e as duas desalinhariam. */
+.keybind__grupo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.keybind__grupo .keybind {
+  min-width: 168px;
+}
+
+.keybind__limpar {
+  width: 30px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: var(--lavender);
+  font-size: 17px;
+  line-height: 1;
+  transition: color 0.13s, border-color 0.13s, background 0.13s;
+}
+
+.keybind__limpar:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: var(--level-0);
+}
+
 .keybind {
   display: flex;
   align-items: center;

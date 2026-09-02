@@ -1,30 +1,46 @@
 import { uIOhook, UiohookKey } from 'uiohook-napi';
-import { getSettings } from './settings.js';
+import { getSettings, ACOES_DE_ATALHO, type AcaoDeAtalho } from './settings.js';
 
 /**
- * Hold-to-talk global.
+ * Hold-to-talk global e atalhos globais.
  *
  * O globalShortcut do Electron so dispara no keydown - nao existe keyup -,
- * entao push-to-talk de verdade exige um hook de teclado no nivel do SO.
+ * entao push-to-talk de verdade exige um hook de teclado no nivel do SO. Os
+ * atalhos de mudo/surdo pegam carona no mesmo hook: subir um segundo
+ * mecanismo pra escutar o mesmo teclado seria dobrar a superficie por nada.
  *
  * SEGURANCA, duas garantias:
  *
- * 1. O hook so sobe quando o usuario escolhe o modo "apertar para falar".
- *    No modo padrao (deteccao de voz) nenhum hook de teclado existe.
- * 2. Enquanto ativo, ele so compara o keycode com a tecla vinculada e
+ * 1. O hook so sobe quando ha motivo: modo "apertar para falar" escolhido OU
+ *    pelo menos um atalho vinculado. Sem nenhum dos dois - que e como o app
+ *    sai de fabrica - nenhum hook de teclado existe.
+ *    (Ate a 0.35 a unica condicao era o modo PTT; os atalhos da 0.36
+ *    acrescentaram a segunda.)
+ * 2. Enquanto ativo, ele so compara o keycode com as teclas vinculadas e
  *    descarta o resto na hora. Nada e gravado, acumulado ou enviado pra
  *    lugar nenhum. A unica excecao e o modo de captura, que le UMA tecla
  *    para o usuario vincular e se encerra.
  */
 
 type Listener = (down: boolean) => void;
+type AtalhoListener = (acao: AcaoDeAtalho) => void;
 
 let handlersBound = false;
 let running = false;
 let available = true; // otimista ate uma tentativa de start falhar
 let listener: Listener | null = null;
+let atalhoListener: AtalhoListener | null = null;
 let captureResolve: ((key: CapturedKey) => void) | null = null;
 let held = false;
+
+/**
+ * Teclas de atalho ja disparadas e ainda seguradas.
+ *
+ * Atalho e alternancia: sem isto, segurar a tecla faria o auto-repeat do SO
+ * ligar e desligar o microfone dezenas de vezes por segundo. Mesmo papel do
+ * `held` do PTT, so que por tecla.
+ */
+const atalhosSegurados = new Set<number>();
 
 /**
  * Nomes das teclas. A base vem do proprio UiohookKey invertido - assim nao
@@ -148,8 +164,45 @@ export function isAvailable(): boolean {
   return available;
 }
 
-export function init(onChange: Listener): void {
+export function init(onChange: Listener, onAtalho?: AtalhoListener): void {
   listener = onChange;
+  atalhoListener = onAtalho ?? null;
+}
+
+/**
+ * A acao vinculada a esta tecla, se houver.
+ *
+ * Percorre o mapa em vez de manter um indice invertido: sao duas acoes, e um
+ * indice a mais e mais um lugar pra ficar dessincronizado do settings.json.
+ */
+function acaoDaTecla(keycode: number): AcaoDeAtalho | null {
+  const { atalhos } = getSettings();
+  for (const acao of ACOES_DE_ATALHO) {
+    if (atalhos[acao]?.keycode === keycode) return acao;
+  }
+  return null;
+}
+
+/** Alguma tecla vinculada a alguma acao? Decide se o hook precisa subir. */
+function temAtalho(): boolean {
+  const { atalhos } = getSettings();
+  return ACOES_DE_ATALHO.some((acao) => atalhos[acao] !== undefined);
+}
+
+/**
+ * A tecla ja esta em uso por outra funcao?
+ *
+ * Vincular a mesma tecla duas vezes nao daria erro - daria as duas acoes de
+ * uma vez, e ninguem entenderia por que mutar tambem ensurdece. Quem chama e
+ * a rota de gravar, que recusa antes de escrever.
+ */
+export function teclaEmUso(keycode: number, exceto?: AcaoDeAtalho): AcaoDeAtalho | 'ptt' | null {
+  const s = getSettings();
+  if (s.pttKeycode === keycode) return 'ptt';
+  for (const acao of ACOES_DE_ATALHO) {
+    if (acao !== exceto && s.atalhos[acao]?.keycode === keycode) return acao;
+  }
+  return null;
 }
 
 function bindHandlers(): void {
@@ -166,6 +219,19 @@ function bindHandlers(): void {
       return;
     }
 
+    // Atalhos vem ANTES do PTT: a tecla so pode estar em uma das duas
+    // funcoes (ver teclaEmUso), entao a ordem nunca decide nada de verdade -
+    // mas se um settings.json editado a mao burlar a checagem, disparar o
+    // atalho e nao o PTT e o lado menos pior: o PTT preso deixaria o
+    // microfone aberto sem ninguem perceber.
+    const acao = acaoDaTecla(e.keycode);
+    if (acao) {
+      if (atalhosSegurados.has(e.keycode)) return; // auto-repeat do SO
+      atalhosSegurados.add(e.keycode);
+      atalhoListener?.(acao);
+      return;
+    }
+
     const s = getSettings();
     if (s.voiceMode !== 'ptt' || s.pttKeycode === null) return;
     if (e.keycode !== s.pttKeycode) return; // qualquer outra tecla e ignorada
@@ -175,6 +241,12 @@ function bindHandlers(): void {
   });
 
   uIOhook.on('keyup', (e) => {
+    // Solta a trava do auto-repeat mesmo que a tecla tenha deixado de ser
+    // atalho no meio do caminho: sem isto, trocar a tecla enquanto ela esta
+    // pressionada deixaria o keycode antigo presente no conjunto pra sempre,
+    // e ele nunca mais dispararia se voltasse a ser vinculado.
+    atalhosSegurados.delete(e.keycode);
+
     const s = getSettings();
     if (s.voiceMode !== 'ptt' || s.pttKeycode === null) return;
     if (e.keycode !== s.pttKeycode) return;
@@ -211,6 +283,7 @@ function stop(): void {
     /* ja parado */
   }
   running = false;
+  atalhosSegurados.clear();
   // Soltar a tecla enquanto o hook morre deixaria o mic aberto pra sempre.
   if (held) {
     held = false;
@@ -219,11 +292,15 @@ function stop(): void {
 }
 
 /**
- * Liga ou desliga o hook conforme o modo de voz escolhido.
+ * Liga ou desliga o hook conforme o que esta configurado.
  * Chamado no boot e a cada mudanca de configuracao.
+ *
+ * Duas razoes pra ele subir agora, e basta UMA: o modo apertar-para-falar, ou
+ * um atalho vinculado. Sem nenhuma delas o hook desce - e e o que garante que
+ * quem nao usa nenhum dos dois nao tem hook de teclado nenhum rodando.
  */
 export function syncWithSettings(): void {
-  if (getSettings().voiceMode === 'ptt') start();
+  if (getSettings().voiceMode === 'ptt' || temAtalho()) start();
   else stop();
 }
 

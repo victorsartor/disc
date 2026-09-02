@@ -14,10 +14,12 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
   getSettings, patchSettings, setVolume, setScreenVolume, sanitizePatch,
+  type AcaoDeAtalho,
 } from './settings.js';
 import {
   init as initPtt, syncWithSettings as syncPtt, shutdown as shutdownPtt,
   captureKey, cancelCapture, isAvailable as pttAvailable, resolveDomKey,
+  teclaEmUso,
 } from './ptt.js';
 import {
   showOverlay, hideOverlay, destroyOverlay, toggleOverlay,
@@ -208,10 +210,17 @@ function createWindow(): void {
       height: TITLEBAR_HEIGHT,
     },
     webPreferences: {
-      preload: join(__dirname, 'preload.mjs'),
+      preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,   // renderer isolado do Node
       nodeIntegration: false,   // sem require() no renderer
-      sandbox: false,           // exigido para preload em ESM
+      // O renderer roda no sandbox do sistema operacional. As duas linhas
+      // acima ja separavam o renderer do Node; esta separa o PROCESSO do
+      // resto da maquina - se uma falha do Chromium for explorada por
+      // conteudo que chegou pelo chat, o que ela alcanca para na caixa.
+      //
+      // Exige preload em CommonJS (.cjs), e e so por isso que ficou
+      // desligado ate a 0.35. Ver o comentario no vite.config.ts.
+      sandbox: true,
     },
   });
 
@@ -298,8 +307,16 @@ if (!app.requestSingleInstanceLock()) {
     initUpdater(() => win);
 
     // Hold-to-talk real: hook de teclado no nivel do SO, com keydown E keyup.
-    // So sobe se o modo escolhido for PTT. Ver a nota de seguranca em ptt.ts.
-    initPtt((down) => win?.webContents.send('ptt:state', down));
+    // So sobe se o modo escolhido for PTT ou se houver atalho vinculado. Ver
+    // a nota de seguranca em ptt.ts.
+    initPtt(
+      (down) => win?.webContents.send('ptt:state', down),
+      // Quem decide o que "mudo" faz e o renderer, que e onde o estado do
+      // microfone vive: daqui sai so o nome da acao. O main mandar
+      // "desligue o mic" exigiria ele saber se o mic ja esta ligado, e esse
+      // e justamente o tipo de estado duplicado que sai de sincronia.
+      (acao) => win?.webContents.send('atalho:acionado', acao),
+    );
     syncPtt();
 
     globalShortcut.register('Control+Shift+O', () => {
@@ -657,10 +674,25 @@ ipcMain.handle('settings:get', () => ({
 ipcMain.handle('settings:patch', (_e, raw: unknown) => {
   const patch = sanitizePatch(raw);
   const next = patchSettings(patch);
-  // Liga o hook ao entrar em PTT, derruba ao sair (soltando a tecla presa).
-  if (patch.voiceMode) syncPtt();
+  // Liga o hook ao entrar em PTT ou ao vincular o primeiro atalho, e derruba
+  // ao sair dos dois (soltando a tecla presa). Os atalhos entram na condicao
+  // porque o hook agora tambem sobe por causa deles - ver syncWithSettings.
+  if (patch.voiceMode || patch.atalhos) syncPtt();
   return { ...next, pttAvailable: pttAvailable() };
 });
+
+/**
+ * A tecla ja esta em uso? Devolve a funcao que a ocupa, ou null.
+ *
+ * Mora aqui e nao no renderer porque quem sabe o que esta vinculado e o
+ * settings.json - deixar o renderer conferir seria manter uma segunda copia
+ * da regra, e as duas discordariam na primeira acao nova.
+ */
+ipcMain.handle('settings:key-in-use', (_e, keycode: unknown, exceto: unknown) =>
+  Number.isInteger(keycode)
+    ? teclaEmUso(keycode as number, exceto as AcaoDeAtalho | undefined)
+    : null,
+);
 
 ipcMain.handle('settings:capture-key', () => captureKey());
 
