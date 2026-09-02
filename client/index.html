@@ -22,10 +22,22 @@
          img-src: o audio que alguem manda no chat e servido pelo backend, e
          um <audio> apontando pra la e tratado como midia, nao como imagem.
          Com 'self' sozinho o Chromium recusa e o player fica mudo SEM erro
-         nenhum - nem no console, nem no elemento. -->
+         nenhum - nem no console, nem no elemento.
+
+         script-src ganha 'wasm-unsafe-eval' por causa da supressao de ruido
+         (src/lib/rnnoise.ts): compilar um modulo WebAssembly conta como
+         script-src, e com a CSP so em 'self' o Chromium recusa a compilacao
+         dentro do AudioWorklet.
+
+         'wasm-unsafe-eval' NAO e o 'unsafe-eval'. Ele libera exatamente uma
+         coisa - instanciar WebAssembly a partir de bytes - e continua
+         proibindo eval() e new Function() sobre string, que sao o vetor de
+         XSS que esta CSP existe pra fechar. Os bytes tambem nao vem da rede:
+         chegam embutidos no bundle, entao nao ha origem externa que possa
+         escolher o que e compilado. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: http://localhost:3000; media-src 'self' blob: https: http://localhost:3000; connect-src 'self' https: wss:;"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https: http://localhost:3000; media-src 'self' blob: https: http://localhost:3000; connect-src 'self' https: wss:;"
     />
     <title>Disneia</title>
   </head>

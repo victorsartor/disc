@@ -30,6 +30,27 @@
 		file_server
 	}
 
+	# Anexos do chat, com teto de corpo NO PROXY.
+	#
+	# O teto de verdade (200 MiB, com mensagem de erro em portugues) e do
+	# Fastify, contado byte a byte enquanto o arquivo passa - ver o
+	# /api/arquivos em server/src/arquivos.ts. Este aqui e o de fora: sem ele,
+	# uma conexao que despeja bytes sem parar so morre depois que a aplicacao
+	# contou 200 MiB, e o Caddy ja escreveu tudo isso no socket do container.
+	#
+	# 210 MiB, e nao 200: a folga garante que quem manda um arquivo pouco
+	# acima do limite receba o 413 DA APLICACAO, que explica o que houve, em
+	# vez do 413 seco do proxy. O proxy so entra no caso absurdo.
+	#
+	# O GET de download tambem cai aqui, e nao ha problema: requisicao sem
+	# corpo nunca encosta no limite.
+	handle /api/arquivos* {
+		request_body {
+			max_size 210MiB
+		}
+		reverse_proxy server:3000
+	}
+
 	handle {
 		reverse_proxy server:3000
 	}

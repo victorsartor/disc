@@ -387,6 +387,7 @@ export function useRoom(
         echoCancellation: cfg?.echoCancellation ?? true,
         noiseSuppression: cfg?.noiseSuppression ?? true,
         autoGainControl: cfg?.autoGainControl ?? true,
+        rnnoise: cfg?.rnnoise ?? false,
       });
       mic.corte = cfg?.micSensitivity ?? 0;
       mic.portaoLigado = cfg?.voiceMode !== 'ptt';
@@ -444,12 +445,16 @@ export function useRoom(
     const room = roomRef.current;
     if (room) {
       if (patch.speakerDeviceId) await room.switchActiveDevice('audiooutput', patch.speakerDeviceId);
-      // Estes so existem no momento da captura: exigem microfone novo.
+      // Estes so existem no momento da captura: exigem microfone novo. O
+      // rnnoise entra na lista por um motivo proprio - ele nao e uma flag do
+      // getUserMedia, e um no a mais no grafo, e o grafo e montado uma vez
+      // no Mic.abrir. Ligar ou desligar significa remontar.
       const recaptura =
         patch.micDeviceId !== undefined ||
         patch.noiseSuppression !== undefined ||
         patch.echoCancellation !== undefined ||
-        patch.autoGainControl !== undefined;
+        patch.autoGainControl !== undefined ||
+        patch.rnnoise !== undefined;
       if (recaptura) await rebuildMic();
     }
     // Ao voltar pro modo VAD, o mic deve reabrir sozinho.
@@ -782,6 +787,7 @@ export function useRoom(
             echoCancellation: cfg?.echoCancellation ?? true,
             noiseSuppression: cfg?.noiseSuppression ?? true,
             autoGainControl: cfg?.autoGainControl ?? true,
+            rnnoise: cfg?.rnnoise ?? false,
           });
           mic.corte = cfg?.micSensitivity ?? 0;
           mic.portaoLigado = cfg?.voiceMode !== 'ptt';

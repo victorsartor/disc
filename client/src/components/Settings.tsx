@@ -361,6 +361,23 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
               silêncio junto. Se o microfone parecer pegar tudo mesmo com o
               portão ajustado, desligue este primeiro.
             </p>
+
+            <label className="settings__row">
+              <span className="settings__label">Supressão avançada (RNNoise)</span>
+              <input
+                type="checkbox"
+                className="settings__check"
+                checked={settings.rnnoise}
+                onChange={(e) => void onPatch({ rnnoise: e.target.checked })}
+              />
+            </label>
+
+            <p className="settings__hint">
+              As opções acima só tratam o silêncio entre as frases. Esta age
+              enquanto você fala: tira teclado, ventilador e cachorro sem
+              levar a sua voz junto. Custa um pouco de processador — se a voz
+              sair estranha ou o jogo engasgar, desligue.
+            </p>
           </section>
 
           <section className="settings__group">

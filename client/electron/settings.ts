@@ -22,6 +22,15 @@ export interface Settings {
   /** Ganho automatico. Ligado, ele AMPLIFICA o silencio entre as frases -
    *  e a causa classica de "meu microfone pega tudo". */
   autoGainControl: boolean;
+  /**
+   * Supressao de ruido por RNNoise (src/lib/rnnoise.ts).
+   *
+   * Diferente das tres acima, que sao flags entregues ao Chromium: esta
+   * monta um no a mais no grafo de audio do microfone, com um modelo em
+   * WebAssembly rodando na thread de audio. E a unica que age DENTRO da
+   * fala - as outras so tratam o silencio entre as frases.
+   */
+  rnnoise: boolean;
   /** identity -> multiplicador de volume da VOZ (0 a 2) */
   volumes: Record<string, number>;
   /** identity -> volume do SOM DA TELA daquela pessoa (0 a 1) */
@@ -85,6 +94,12 @@ const DEFAULTS: Settings = {
   noiseSuppression: true,
   echoCancellation: true,
   autoGainControl: true,
+  // Desligada por padrao, ao contrario das tres acima. Nao e desconfianca
+  // do filtro: e que ele e um caminho de audio NOVO, e um caminho de audio
+  // que da errado nao degrada - emudece. Quem ligar escolheu correr o risco
+  // sabendo desligar. Vale reavaliar este padrao depois de algumas semanas
+  // de chamada de verdade em maquina de todo mundo.
+  rnnoise: false,
   volumes: {},
   screenVolumes: {},
   voiceVolume: 100,
@@ -167,7 +182,7 @@ export function getSettings(): Settings {
 const ALLOWED_KEYS = new Set<keyof Settings>([
   'voiceMode', 'pttKeycode', 'pttKeyLabel', 'micDeviceId',
   'speakerDeviceId', 'micSensitivity', 'noiseSuppression',
-  'echoCancellation', 'autoGainControl', 'volumes', 'screenVolumes',
+  'echoCancellation', 'autoGainControl', 'rnnoise', 'volumes', 'screenVolumes',
   'voiceVolume', 'effectsVolume', 'chatVolume',
   'screenAudioDeviceId', 'isolarAudioNaTela',
   'overlayEnabled', 'overlayX', 'overlayY', 'theme',

@@ -242,6 +242,14 @@ export interface Settings {
   noiseSuppression: boolean;
   echoCancellation: boolean;
   autoGainControl: boolean;
+  /**
+   * Supressão de ruído por RNNoise, além da do Chromium.
+   *
+   * A do Chromium (`noiseSuppression`) e o portão (`micSensitivity`) só
+   * agem no silêncio entre as frases. Esta age DENTRO da fala: teclado e
+   * ventilador somem enquanto você fala. Ver lib/rnnoise.ts.
+   */
+  rnnoise: boolean;
   volumes: Record<string, number>;
   /** identity -> volume do som da tela daquela pessoa (0 a 2). */
   screenVolumes: Record<string, number>;
