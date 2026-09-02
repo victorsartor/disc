@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Me, UserProfile } from '../types';
+import type { Me, StatusEscolhido, UserProfile } from '../types';
 import { THEMES, type ThemeId } from '../lib/themes';
 import { EFEITOS, classeDoEfeito, type EfeitoId } from '../lib/efeitos';
 import {
   pickImageFile, prepareImage, AVATAR_SPEC, BANNER_SPEC,
 } from '../lib/image';
 import { IconCamera, IconCheck, IconTrash } from './Icons';
+import { StatusPicker } from './StatusPicker';
 
 /** Espelha os limites de server/src/profile.ts. */
 const MAX_BIO = 300;
@@ -31,6 +32,9 @@ interface Props {
   me: Me;
   theme: ThemeId;
   onThemeChange: (theme: ThemeId) => void;
+  /** O status que você escolheu — o seletor mostra este, não o efetivo. */
+  statusEscolhido: StatusEscolhido;
+  onStatusChange: (status: StatusEscolhido) => void;
   /** Devolve o perfil salvo pro App atualizar a foto na sidebar e no chat. */
   onSaved: (user: UserProfile) => void;
   onClose: () => void;
@@ -43,7 +47,9 @@ interface Props {
  * proposital — foto e tema você julga vendo, e ver exige já ter aplicado.
  * Escrever, não: um rascunho pela metade não deveria virar o seu perfil.
  */
-export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
+export function Profile({
+  me, theme, onThemeChange, statusEscolhido, onStatusChange, onSaved, onClose,
+}: Props) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
@@ -189,6 +195,8 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
             name={user?.name ?? me.name}
             efeito={user?.profileEffect}
             busy={busy}
+            statusEscolhido={statusEscolhido}
+            onStatusChange={onStatusChange}
             onPick={(kind) => void trocarImagem(kind)}
             onRemove={(kind) => void removerImagem(kind)}
           />
@@ -292,7 +300,8 @@ export function Profile({ me, theme, onThemeChange, onSaved, onClose }: Props) {
  * câmera, cada uma no seu canto.
  */
 function Cover({
-  bannerUrl, avatarUrl, name, efeito, busy, onPick, onRemove,
+  bannerUrl, avatarUrl, name, efeito, busy,
+  statusEscolhido, onStatusChange, onPick, onRemove,
 }: {
   bannerUrl: string | null;
   avatarUrl: string | null;
@@ -300,6 +309,8 @@ function Cover({
   /** Id do efeito vindo do servidor. Validado antes de virar classe. */
   efeito?: string;
   busy: 'avatar' | 'banner' | null;
+  statusEscolhido: StatusEscolhido;
+  onStatusChange: (status: StatusEscolhido) => void;
   onPick: (kind: 'avatar' | 'banner') => void;
   onRemove: (kind: 'avatar' | 'banner') => void;
 }) {
@@ -335,6 +346,19 @@ function Cover({
 
       <div className="capa__foto">
         <Avatar url={avatarUrl} name={name} size={104} className="avatar--grande" />
+
+        {/* O status mora aqui, no canto oposto à câmera: trocar o seu
+            status é assunto de perfil, e no rodapé da coluna a bolinha
+            ficava sozinha numa linha só dela, sem dizer o que era. */}
+        <div className="capa__status">
+          <StatusPicker
+            escolhido={statusEscolhido}
+            onChange={onStatusChange}
+            direcao="baixo"
+            grande
+          />
+        </div>
+
         <button
           className="capa__btn capa__btn--foto"
           onClick={() => onPick('avatar')}

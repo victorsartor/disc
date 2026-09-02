@@ -507,8 +507,6 @@ export function App() {
         presence={presence}
         users={users}
         status={status.efetivo}
-        statusEscolhido={status.escolhido}
-        onStatusChange={(s) => void status.escolher(s)}
         connecting={room.connecting}
         micOn={room.micOn}
         deafened={room.deafened}
@@ -623,6 +621,8 @@ export function App() {
           me={me}
           theme={theme}
           onThemeChange={(t) => void room.updateSettings({ theme: t })}
+          statusEscolhido={status.escolhido}
+          onStatusChange={(s) => void status.escolher(s)}
           onSaved={onProfileSaved}
           onClose={() => setProfileOpen(false)}
         />

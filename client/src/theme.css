@@ -2506,11 +2506,8 @@ textarea {
   background: var(--hover);
 }
 
-/* Abre pra CIMA: o seletor mora no rodapé da coluna, e pra baixo o menu
-   sairia da janela. */
 .statuspick__menu {
   position: absolute;
-  bottom: calc(100% + 6px);
   left: 0;
   z-index: 45;
   width: 244px;
@@ -2521,6 +2518,17 @@ textarea {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* De que lado o menu abre depende de onde o seletor está na tela: encostado
+   no rodapé só cabe pra cima, e embaixo da foto do perfil, que fica no topo
+   da janela, só cabe pra baixo. */
+.statuspick__menu--cima {
+  bottom: calc(100% + 6px);
+}
+
+.statuspick__menu--baixo {
+  top: calc(100% + 6px);
 }
 
 .statuspick__item {

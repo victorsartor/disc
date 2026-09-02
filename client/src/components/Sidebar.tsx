@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ConnectionQuality } from 'livekit-client';
 import type {
-  Channel, Me, Presence, StatusEfetivo, StatusEscolhido, UserPresence,
+  Channel, Me, Presence, StatusEfetivo, UserPresence,
 } from '../types';
 import type { Peer } from '../lib/useRoom';
 import {
@@ -9,6 +9,7 @@ import {
   IconHeadphonesOff, IconLeave, IconSettings,
 } from './Icons';
 import { Avatar } from './Profile';
+import { STATUS } from '../lib/status';
 import logo from '../assets/logo.png';
 
 /**
@@ -60,21 +61,6 @@ function tituloQualidade(q: ConnectionQuality): string {
   }
 }
 
-/** Rótulo e cor de cada status, num lugar só. */
-const STATUS = {
-  disponivel: { label: 'Disponível', cor: 'var(--ok)' },
-  ausente: { label: 'Ausente', cor: 'var(--live)' },
-  invisivel: { label: 'Invisível', cor: 'var(--lavender)' },
-  offline: { label: 'Off-line', cor: 'var(--lavender)' },
-} as const;
-
-/** O que o seletor oferece, com a explicação de cada um. */
-const ESCOLHAS: { id: StatusEscolhido; dica: string }[] = [
-  { id: 'disponivel', dica: 'Vira "Ausente" sozinho depois de 10 min de microfone mudo' },
-  { id: 'ausente', dica: 'Fica ausente mesmo com o microfone aberto' },
-  { id: 'invisivel', dica: 'Você aparece off-line pros outros' },
-];
-
 interface Props {
   me: Me;
   channels: Channel[];
@@ -83,10 +69,12 @@ interface Props {
   presence: Presence;
   /** Todo mundo do servidor, pra lista de quem está online fora de call. */
   users: UserPresence[];
-  /** O seu status como os outros veem — pode divergir do escolhido. */
+  /**
+   * O seu status como os outros veem — pode divergir do escolhido. Aqui
+   * ele só se mostra; quem TROCA é a bolinha embaixo da sua foto, no
+   * perfil, e por isso a escolha não passa mais por esta coluna.
+   */
   status: StatusEfetivo;
-  statusEscolhido: StatusEscolhido;
-  onStatusChange: (status: StatusEscolhido) => void;
   connecting: boolean;
   micOn: boolean;
   deafened: boolean;
@@ -104,8 +92,8 @@ interface Props {
 }
 
 export function Sidebar({
-  me, channels, activeChannel, peers, presence, users, status, statusEscolhido,
-  onStatusChange, connecting, micOn, deafened,
+  me, channels, activeChannel, peers, presence, users, status,
+  connecting, micOn, deafened,
   pttMode, pttDown, onJoin, onLeave, onToggleMic, onToggleDeafen,
   onVolumeChange, onOpenSettings, onOpenProfile, onOpenUser,
 }: Props) {
@@ -190,7 +178,7 @@ export function Sidebar({
         <button
           className="userbar__id userbar__id--botao"
           onClick={onOpenProfile}
-          title="Seu perfil"
+          title="Seu perfil — e onde se troca o status"
         >
           <span className="userbar__foto">
             <Avatar url={me.avatarUrl} name={me.name} size={32} />
@@ -206,8 +194,6 @@ export function Sidebar({
             </div>
           </div>
         </button>
-
-        <StatusPicker escolhido={statusEscolhido} onChange={onStatusChange} />
 
         <div className="userbar__actions">
           <button
@@ -240,75 +226,6 @@ export function Sidebar({
         </div>
       </div>
     </aside>
-  );
-}
-
-/**
- * O seletor de status.
- *
- * Mostra a ESCOLHA, não o efetivo: se você escolheu "Disponível" e o relógio
- * te deixou ausente, o certo é o seletor continuar marcando Disponível —
- * senão parece que alguém mexeu na sua opção. Quem mostra o efetivo é a
- * linha do nome, logo acima.
- */
-function StatusPicker({
-  escolhido, onChange,
-}: {
-  escolhido: StatusEscolhido;
-  onChange: (s: StatusEscolhido) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  return (
-    <div className="statuspick" ref={ref}>
-      <button
-        className="statuspick__btn"
-        onClick={() => setOpen((v) => !v)}
-        title="Mudar seu status"
-        aria-haspopup="menu"
-        aria-expanded={open}
-      >
-        <span className="bolinha" style={{ background: STATUS[escolhido].cor }} />
-      </button>
-
-      {open && (
-        <div className="statuspick__menu" role="menu">
-          {ESCOLHAS.map(({ id, dica }) => (
-            <button
-              key={id}
-              role="menuitemradio"
-              aria-checked={escolhido === id}
-              className={`statuspick__item${escolhido === id ? ' statuspick__item--ativo' : ''}`}
-              onClick={() => {
-                onChange(id);
-                setOpen(false);
-              }}
-            >
-              <span className="bolinha" style={{ background: STATUS[id].cor }} />
-              <span className="statuspick__texto">
-                <span className="statuspick__nome">{STATUS[id].label}</span>
-                <span className="statuspick__dica">{dica}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
