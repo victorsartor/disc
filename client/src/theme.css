@@ -694,6 +694,12 @@ textarea {
      a pilha. Sem isto, uma faixa invisível cobriria a conversa inteira e
      nem selecionar texto daria mais. */
   pointer-events: none;
+  /* Cinto e suspensório do limite que o arrasto já aplica: o que estiver com
+     `transform` NÃO é recortado pela janela do app, então uma conta errada
+     ali em cima não põe o vídeo passeando por cima do sistema operacional —
+     ele para na borda desta caixa. O .volpop não é afetado: é `fixed`, e
+     `fixed` não se prende a overflow. */
+  overflow: hidden;
 }
 
 .pilha {
@@ -752,11 +758,14 @@ textarea {
   right: 16px;
 }
 
-/* ── A quina de puxar o tamanho ──────────────────────────────────────────
-   Fica na quina que aponta pra DENTRO da janela, que é a única das quatro
-   com espaço livre à frente: encostada na borda, metade dela cairia fora da
-   área clicável. Por isso a posição muda com o canto, e a diagonal do
-   cursor junto. */
+/* ── As quinas de puxar o tamanho ────────────────────────────────────────
+   Duas, uma de cada lado. Com uma só — a do lado livre — quem estivesse com
+   a pilha à direita tinha que atravessar a janelinha inteira pra achar a
+   quina, e ela parecia presa num canto do app.
+
+   As duas ficam na borda vertical que aponta pra DENTRO: ancorada embaixo,
+   em cima; ancorada em cima, embaixo. Encostadas na borda de fora, metade
+   delas cairia fora da área clicável. */
 .pilha__alca {
   position: absolute;
   width: 20px;
@@ -764,25 +773,37 @@ textarea {
   z-index: 2;
 }
 
-.pilha--cima-esq .pilha__alca {
-  right: -4px;
-  bottom: -4px;
-  cursor: nwse-resize;
+.pilha__alca--esq {
+  left: -4px;
 }
+.pilha__alca--dir {
+  right: -4px;
+}
+
+.pilha--cima-esq .pilha__alca,
 .pilha--cima-dir .pilha__alca {
-  left: -4px;
   bottom: -4px;
-  cursor: nesw-resize;
 }
-.pilha--baixo-esq .pilha__alca {
-  right: -4px;
-  top: -4px;
-  cursor: nesw-resize;
-}
+.pilha--baixo-esq .pilha__alca,
 .pilha--baixo-dir .pilha__alca {
-  left: -4px;
   top: -4px;
+}
+
+/* A diagonal do cursor sai da quina onde a alça está. Ancorada embaixo ela
+   fica em cima: à esquerda vira "\", à direita "/" — e o contrário quando a
+   pilha está ancorada em cima. */
+.pilha--baixo-esq .pilha__alca--esq,
+.pilha--baixo-dir .pilha__alca--esq,
+.pilha--cima-esq .pilha__alca--dir,
+.pilha--cima-dir .pilha__alca--dir {
   cursor: nwse-resize;
+}
+
+.pilha--baixo-esq .pilha__alca--dir,
+.pilha--baixo-dir .pilha__alca--dir,
+.pilha--cima-esq .pilha__alca--esq,
+.pilha--cima-dir .pilha__alca--esq {
+  cursor: nesw-resize;
 }
 
 /* Duas riscas curtas, como todo canto de redimensionar. Só aparecem com o
@@ -804,16 +825,21 @@ textarea {
   opacity: 0.55;
 }
 
-/* A risca aponta pro lado pra onde a quina cresce — uma regra por canto, e
-   não três que se sobrescrevem: com cascata a ordem vira a explicação, e
-   quem mexer numa não tem como saber que estava consertando outra. */
-.pilha--cima-dir .pilha__alca::after {
+/* A risca abraça a quina em que está. O desenho de base é um "L" apontando
+   pra baixo-direita, então: espelha em X na alça da esquerda, e em Y quando
+   a pilha está ancorada EMBAIXO — que é justamente quando as alças sobem
+   pro topo dela. */
+.pilha__alca--esq::after {
   transform: scaleX(-1);
 }
+
+.pilha--baixo-esq .pilha__alca::after,
 .pilha--baixo-dir .pilha__alca::after {
   transform: scaleY(-1);
 }
-.pilha--baixo-esq .pilha__alca::after {
+
+.pilha--baixo-esq .pilha__alca--esq::after,
+.pilha--baixo-dir .pilha__alca--esq::after {
   transform: scale(-1, -1);
 }
 
@@ -883,6 +909,9 @@ textarea {
   position: absolute;
   left: 12px;
   bottom: 12px;
+  /* Nunca mais larga que a janelinha. Sem o teto, um nome comprido numa
+     transmissão pequena empurrava a etiqueta pra fora do quadro. */
+  max-width: calc(100% - 24px);
   background: var(--glass);
   backdrop-filter: blur(12px);
   border: 1px solid var(--line);
@@ -893,6 +922,15 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Quem cede é o nome: o ícone e o cronômetro têm largura própria e não
+   podem encolher — um relógio cortado pela metade não conta nada. */
+.quadro__nome {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Cronômetro da live ──────────────────────────────────────────────────
@@ -3014,12 +3052,21 @@ textarea {
 
 
 
-/* O seu próprio compartilhamento tem a mesma moldura dos outros — só a
-   etiqueta muda de tom, porque "Você está compartilhando" é conferência e
-   não conteúdo, e não deve competir com o nome de quem você assiste. */
+/* Na SUA janelinha a etiqueta só aparece com o mouse em cima. Você já sabe
+   que está compartilhando — o botão vermelho na barra de cima diz isso o
+   tempo todo — e numa janelinha pequena "Você está compartilhando 02:37"
+   cobria metade da imagem que a etiqueta existia pra deixar conferir.
+   Quem ASSISTE continua com a dele fixa: ali o nome responde "de quem é
+   essa tela?", que não é óbvio, e o cronômetro diz há quanto tempo perdeu. */
 .quadro--meu .quadro__label {
   color: var(--lavender);
   font-weight: 400;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.quadro--meu:hover .quadro__label {
+  opacity: 1;
 }
 
 .quadro__acoes {

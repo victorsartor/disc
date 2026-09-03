@@ -52,6 +52,17 @@ const PADRAO = 360;
 const FOLGA = 4;
 
 /**
+ * Um número entre dois limites, aguentando limites invertidos.
+ *
+ * O `Math.min` por fora é o que salva quando a pilha é MAIOR que a área: ali
+ * o mínimo passa o máximo, e um clamp ingênuo devolveria o piso — a pilha
+ * saltaria pra um canto no primeiro pixel de arrasto.
+ */
+function preso(v: number, min: number, max: number): number {
+  return Math.min(Math.max(v, Math.min(min, max)), Math.max(min, max));
+}
+
+/**
  * "07:12" até uma hora; "1:07:12" depois dela.
  *
  * Sem a casa da hora quando ela é zero: a maioria das transmissões dura
@@ -126,8 +137,22 @@ export function Stage({
 
   const [arrastando, setArrastando] = useState(false);
   const [medindo, setMedindo] = useState(false);
-  /** Onde o gesto começou, e se ele já passou da FOLGA pra virar arrasto. */
-  const gesto = useRef<{ x: number; y: number; moveu: boolean } | null>(null);
+  /**
+   * O gesto em curso.
+   *
+   * `rect` é a caixa da pilha ANTES do transform, medida no pointerdown: é
+   * contra ela que o arrasto é limitado à área, e remedir a cada movimento
+   * daria a caixa já deslocada — o limite andaria junto com o dedo e a pilha
+   * escaparia pela borda assim mesmo.
+   */
+  const gesto = useRef<{
+    x: number;
+    y: number;
+    moveu: boolean;
+    rect: DOMRect | null;
+    /** Qual das duas alças foi pega. Só no redimensionamento. */
+    lado: 'esq' | 'dir';
+  } | null>(null);
   /** Onde a largura parou. O pointerup não traz a posição do mouse. */
   const larguraRef = useRef(largura);
 
@@ -161,14 +186,23 @@ export function Stage({
 
     const onMove = (e: PointerEvent) => {
       const g = gesto.current;
-      if (!g) return;
+      if (!g?.rect) return;
       const dx = e.clientX - g.x;
       const dy = e.clientY - g.y;
       // Antes da folga não mexe em nada: um tremor no clique não pode
       // parecer o começo de um arrasto.
       if (!g.moveu && Math.hypot(dx, dy) < FOLGA) return;
       g.moveu = true;
-      pilha.style.transform = `translate(${dx}px, ${dy}px)`;
+
+      // Presa na área. Sem isto a transmissão sai por cima do resto do
+      // sistema operacional durante o gesto — a janela do app não recorta o
+      // que está com transform, e o que a pessoa vê é o vídeo passeando por
+      // fora do programa.
+      const r = g.rect;
+      const a = area.getBoundingClientRect();
+      pilha.style.transform =
+        `translate(${preso(dx, a.left - r.left, a.right - r.right)}px, ` +
+        `${preso(dy, a.top - r.top, a.bottom - r.bottom)}px)`;
     };
 
     const onUp = () => {
@@ -184,8 +218,18 @@ export function Stage({
       // voltou pro canto antigo e a conta daria sempre ele.
       const r = pilha.getBoundingClientRect();
       const a = area.getBoundingClientRect();
-      const fx = (r.left + r.width / 2 - a.left) / Math.max(1, a.width);
-      const fy = (r.top + r.height / 2 - a.top) / Math.max(1, a.height);
+
+      // A conta é sobre o espaço LIVRE, não sobre a área inteira: 0 é
+      // encostada num lado, 1 no outro, seja qual for o tamanho da pilha.
+      //
+      // Com o centro dela contra a largura total — que era como estava — uma
+      // janelinha grande numa janela estreita mal saía do meio, e o canto
+      // mais perto dava sempre o mesmo: a transmissão grudava de um lado só
+      // e não havia arrasto que a levasse pro outro.
+      const folgaX = a.width - r.width;
+      const folgaY = a.height - r.height;
+      const fx = folgaX > 1 ? preso((r.left - a.left) / folgaX, 0, 1) : 0.5;
+      const fy = folgaY > 1 ? preso((r.top - a.top) / folgaY, 0, 1) : 0.5;
 
       let melhor = canto;
       let perto = Infinity;
@@ -221,9 +265,11 @@ export function Stage({
     const pilha = pilhaRef.current;
     if (!pilha) return;
 
-    // Ancorada à direita, a quina de puxar aponta pra ESQUERDA da tela: ali
-    // arrastar pra esquerda é que aumenta. À esquerda, o contrário.
-    const sinal = CANTOS[canto].x === 1 ? -1 : 1;
+    // Cada alça cresce pro seu lado: puxar a da esquerda PARA a esquerda
+    // aumenta, e a da direita para a direita. É o que a mão espera de uma
+    // quina, e vale igual nos quatro cantos — a borda ancorada é a que fica
+    // parada, mas quem segura a alça vê a largura seguindo o dedo.
+    const sinal = gesto.current?.lado === 'esq' ? -1 : 1;
     const inicioX = gesto.current?.x ?? 0;
     const inicioW = larguraRef.current;
 
@@ -240,9 +286,11 @@ export function Stage({
       onLargura(larguraRef.current);
     };
 
-    // A diagonal do cursor segue a quina: nos cantos em que ela aponta pra
-    // baixo-direita ou cima-esquerda é a "\", nos outros dois a "/".
-    const diag = CANTOS[canto].x === CANTOS[canto].y ? 'app--diag-nwse' : 'app--diag-nesw';
+    // A diagonal do cursor sai da quina em que a alça está: ancorada
+    // embaixo ela fica em cima, e vice-versa.
+    const emCima = CANTOS[canto].y === 1;
+    const esq = gesto.current?.lado === 'esq';
+    const diag = emCima === esq ? 'app--diag-nwse' : 'app--diag-nesw';
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -259,9 +307,24 @@ export function Stage({
     if (e.button !== 0) return;
     // Botão é botão: parar de assistir e tela cheia não podem virar arrasto.
     if ((e.target as HTMLElement).closest('button, .pilha__alca')) return;
-    gesto.current = { x: e.clientX, y: e.clientY, moveu: false };
+    gesto.current = {
+      x: e.clientX,
+      y: e.clientY,
+      moveu: false,
+      rect: pilhaRef.current?.getBoundingClientRect() ?? null,
+      lado: 'dir',
+    };
     setArrastando(true);
   }, []);
+
+  const puxar = (lado: 'esq' | 'dir') => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    // Sem isto o pointerdown sobe pra pilha e o gesto vira arrasto junto.
+    e.stopPropagation();
+    gesto.current = { x: e.clientX, y: e.clientY, moveu: true, rect: null, lado };
+    setMedindo(true);
+  };
 
   if (screens.length === 0 && !localScreen) return null;
 
@@ -294,27 +357,26 @@ export function Stage({
 
         {localScreen && <MeuPreview track={localScreen} startedAt={shareStartedAt} />}
 
-        {/* Na quina que aponta pra dentro da janela: encostada na borda ela
-            ficaria em cima da moldura da própria pilha, e metade da alça
-            cairia fora da área clicável. */}
-        <div
-          className="pilha__alca"
-          role="separator"
-          aria-label="Tamanho da transmissão"
-          title="Arraste para mudar o tamanho — clique duas vezes para o padrão"
-          onPointerDown={(e) => {
-            if (e.button !== 0) return;
-            e.preventDefault();
-            e.stopPropagation();
-            gesto.current = { x: e.clientX, y: e.clientY, moveu: true };
-            setMedindo(true);
-          }}
-          onDoubleClick={() => {
-            larguraRef.current = PADRAO;
-            document.documentElement.style.setProperty('--tela-w', `${PADRAO}px`);
-            onLargura(PADRAO);
-          }}
-        />
+        {/* Uma alça de cada lado, e não só a do lado livre: com uma só, quem
+            estivesse com a pilha à direita tinha que atravessar a janelinha
+            inteira pra achar a quina. As duas ficam na borda vertical que
+            aponta pra dentro — encostadas na de fora, metade delas cairia
+            fora da área clicável. */}
+        {(['esq', 'dir'] as const).map((lado) => (
+          <div
+            key={lado}
+            className={`pilha__alca pilha__alca--${lado}`}
+            role="separator"
+            aria-label="Tamanho da transmissão"
+            title="Arraste para mudar o tamanho — clique duas vezes para o padrão"
+            onPointerDown={puxar(lado)}
+            onDoubleClick={() => {
+              larguraRef.current = PADRAO;
+              document.documentElement.style.setProperty('--tela-w', `${PADRAO}px`);
+              onLargura(PADRAO);
+            }}
+          />
+        ))}
       </div>
 
       {aberto && (
@@ -389,7 +451,7 @@ function Quadro({
 
       <div className="quadro__label">
         <IconBroadcast size={13} />
-        {nome}
+        <span className="quadro__nome">{nome}</span>
         <Cronometro desde={startedAt} />
       </div>
 
@@ -442,8 +504,13 @@ function MeuPreview({
     <div className="quadro quadro--meu" title="O que você está compartilhando">
       {/* Mudo obrigatoriamente: é o som que já está saindo da sua máquina. */}
       <video ref={ref} autoPlay playsInline muted />
+      {/* Só no passar do mouse (ver o CSS). Na SUA janelinha esta etiqueta é
+          a única coisa escrita por cima de um vídeo que você já sabe que
+          está mandando — e numa janelinha pequena ela cobria metade da
+          imagem. Quem assiste continua com a dele fixa: ali o nome é a
+          resposta a "de quem é essa tela?", que não é óbvia. */}
       <div className="quadro__label">
-        Você está compartilhando
+        <span className="quadro__nome">Você está compartilhando</span>
         {startedAt !== null && <Cronometro desde={startedAt} />}
       </div>
     </div>
