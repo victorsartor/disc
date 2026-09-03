@@ -15,7 +15,7 @@ import {
 } from './db.js';
 import { mencionadosEm } from './texto.js';
 import { rateLimit } from './ratelimit.js';
-import { presence, usersPresence, statusEfetivo } from './presence.js';
+import { presence, usersPresence, statusEfetivo, tirarDasOutrasSalas } from './presence.js';
 import { registerProfileRoutes } from './profile.js';
 import { registerFileRoutes, paraCliente, apagarAnexo } from './arquivos.js';
 import { iniciarContagemDeTempo } from './tempo.js';
@@ -135,6 +135,15 @@ app.post('/api/rooms/:channelId/token', async (req, reply) => {
   if (!rateLimit(`token:${user.id}`, 30, 60_000)) {
     return reply.code(429).send({ error: 'muitas tentativas, aguarde' });
   }
+
+  // Antes de emitir o token: quem troca de canal depressa aparecia NOS DOIS,
+  // porque o LiveKit leva alguns segundos pra notar sozinho que a conexão
+  // anterior morreu. Dizer a saída é mais rápido que esperar por ela.
+  //
+  // Sem `await` que segure a resposta — o token não depende disto, e uma
+  // limpeza lenta não pode atrasar a entrada no canal. A deduplicação em
+  // presence() cobre o caso de isto falhar.
+  void tirarDasOutrasSalas(user.id, channelId);
 
   const at = new AccessToken(config.livekit.apiKey, config.livekit.apiSecret, {
     identity: user.id,

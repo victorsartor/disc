@@ -88,20 +88,32 @@ const svc = new RoomServiceClient(
 const TTL_MS = 1500;
 let cache: { at: number; value: Presence } | null = null;
 
-function readAvatar(metadata: string): string | null {
-  try {
-    return metadata ? (JSON.parse(metadata).avatarUrl ?? null) : null;
-  } catch {
-    return null;
-  }
+/**
+ * O identity do LiveKit é o id do usuário — menos o do ingress do OBS, que
+ * ganha sufixo pra não colidir com a sessão de voz da mesma pessoa.
+ */
+function idDoUsuario(identity: string): string {
+  return identity.endsWith('_obs') ? identity.slice(0, -4) : identity;
 }
 
-function toMember(p: ParticipantInfo): PresenceMember {
+/**
+ * Nome e foto saem do BANCO, não do metadata do LiveKit.
+ *
+ * O metadata é gravado no token, uma vez, quando a pessoa entra na sala — é
+ * um retrato do momento da entrada. Quem trocasse de foto durante uma call
+ * continuava com a antiga na lista de todo mundo até sair e voltar, que foi
+ * exatamente a queixa. O banco é a fonte da verdade e já está aqui.
+ *
+ * O metadata segue sendo emitido no token: o CLIENTE ainda o lê pro primeiro
+ * quadro, antes de a primeira volta da presença chegar.
+ */
+function toMember(p: ParticipantInfo, donos: Map<string, User>): PresenceMember {
   const mic = p.tracks.find((t) => t.source === TrackSource.MICROPHONE);
+  const dono = donos.get(idDoUsuario(p.identity));
   return {
     identity: p.identity,
-    name: p.name || p.identity,
-    avatarUrl: readAvatar(p.metadata),
+    name: dono?.name || p.name || p.identity,
+    avatarUrl: dono?.avatar_url ?? null,
     // Sem faixa de microfone publicada também é mudo: é o estado de quem
     // está em "apertar para falar" e não está com a tecla pressionada.
     isMuted: !mic || mic.muted,
@@ -109,22 +121,74 @@ function toMember(p: ParticipantInfo): PresenceMember {
   };
 }
 
+/**
+ * Tira alguém de todas as salas menos a que acabou de entrar.
+ *
+ * Trocar de canal depressa deixava a pessoa aparecendo NAS DUAS: o LiveKit
+ * leva alguns segundos pra perceber sozinho que a conexão antiga morreu, e
+ * nesse meio tempo `listParticipants` responde com ela nos dois lugares.
+ * Aqui a saída é dita na hora, e não esperada.
+ *
+ * Falha de propósito em silêncio: sala que não existe, participante que já
+ * saiu — tudo isso é o resultado desejado, e nenhum deles pode impedir a
+ * pessoa de entrar no canal novo. A deduplicação em `presence()` é a rede
+ * embaixo disto pro caso de a chamada não chegar.
+ */
+export async function tirarDasOutrasSalas(userId: string, salaNova: string): Promise<void> {
+  await Promise.all(
+    listChannels()
+      .filter((ch) => ch.id !== salaNova)
+      .map((ch) => svc.removeParticipant(ch.id, userId).catch(() => {})),
+  );
+  // O cache de 1,5s guardaria a foto anterior do mundo justamente agora, que
+  // é quando ela mais engana: a pessoa já saiu e a lista ainda a mostra lá.
+  cache = null;
+}
+
 export async function presence(): Promise<Presence> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.value;
 
-  const out: Presence = {};
+  const donos = new Map(allUsers().map((u) => [u.id, u]));
+  const bruto: Record<string, ParticipantInfo[]> = {};
 
   await Promise.all(
     listChannels().map(async (ch) => {
       try {
-        out[ch.id] = (await svc.listParticipants(ch.id)).map(toMember);
+        bruto[ch.id] = await svc.listParticipants(ch.id);
       } catch {
         // Sala em que ninguém entrou ainda não existe no LiveKit, e perguntar
         // por ela dá erro. Canal vazio é a resposta certa, não uma falha.
-        out[ch.id] = [];
+        bruto[ch.id] = [];
       }
     }),
   );
+
+  /**
+   * Uma pessoa está num canal só — o mais recente em que entrou.
+   *
+   * Rede de segurança do `tirarDasOutrasSalas`: se aquela chamada não
+   * chegou (rede, LiveKit reiniciando, queda feia do cliente), a sessão
+   * velha ainda aparece por alguns segundos. `joinedAtMs`, e não `joinedAt`,
+   * porque a troca rápida de canal — que é justamente o caso — acontece
+   * dentro do mesmo segundo, e em segundos as duas empatariam.
+   */
+  const maisRecente = new Map<string, { sala: string; quando: bigint }>();
+  for (const [sala, ps] of Object.entries(bruto)) {
+    for (const p of ps) {
+      const chave = idDoUsuario(p.identity);
+      const atual = maisRecente.get(chave);
+      if (!atual || p.joinedAtMs > atual.quando) {
+        maisRecente.set(chave, { sala, quando: p.joinedAtMs });
+      }
+    }
+  }
+
+  const out: Presence = {};
+  for (const [sala, ps] of Object.entries(bruto)) {
+    out[sala] = ps
+      .filter((p) => maisRecente.get(idDoUsuario(p.identity))?.sala === sala)
+      .map((p) => toMember(p, donos));
+  }
 
   cache = { at: Date.now(), value: out };
   return out;

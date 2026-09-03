@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConnectionQuality } from 'livekit-client';
 import type {
   Channel, Me, Presence, StatusEfetivo, UserPresence,
@@ -29,6 +29,16 @@ const MAX_NOME_CANAL = 40;
  * saber quem está falando numa sala em que você não entrou. `live` é o que
  * distingue os dois, e é o que decide se a linha aceita ajuste de volume.
  */
+/**
+ * O id do usuário por trás de um identity do LiveKit.
+ *
+ * O ingress do OBS entra com sufixo pra não colidir com a sessão de voz da
+ * mesma pessoa — mas o nome e a foto continuam sendo os dela.
+ */
+function idBase(identity: string): string {
+  return identity.endsWith('_obs') ? identity.slice(0, -4) : identity;
+}
+
 interface Row {
   identity: string;
   name: string;
@@ -121,6 +131,34 @@ export function Sidebar({
 }: Props) {
   const podeEditarCanais = me.isAdmin ?? false;
   const [criando, setCriando] = useState(false);
+
+  /**
+   * Nome e foto de cada pessoa, pela lista de presença — que vem do banco a
+   * cada 3s e é a fonte da verdade.
+   *
+   * O nome e o avatar que acompanham um participante do LiveKit vêm do
+   * metadata gravado NO TOKEN, uma vez, quando ele entrou na sala: um
+   * retrato do momento da entrada. Quem trocasse de foto durante uma call
+   * continuava com a antiga na lista de todo mundo até sair e voltar.
+   *
+   * Aplicado por cima das duas listas (a sua sala e as outras) porque as
+   * duas trazem o mesmo retrato velho, por caminhos diferentes.
+   */
+  const donos = useMemo(() => {
+    const m = new Map<string, { name: string; avatarUrl: string | null }>(
+      users.map((u) => [u.identity, { name: u.name, avatarUrl: u.avatarUrl }]),
+    );
+    // Você mesmo sai do `me`, que o salvamento do perfil já atualiza na hora
+    // (ver onProfileSaved no App). Sem isto, trocar a própria foto durante
+    // uma call só apareceria na sua linha na volta seguinte da presença.
+    m.set(me.id, { name: me.name, avatarUrl: me.avatarUrl });
+    return m;
+  }, [users, me.id, me.name, me.avatarUrl]);
+
+  const comFotoAtual = <T extends { identity: string }>(m: T): T => {
+    const dono = donos.get(idBase(m.identity));
+    return dono ? { ...m, name: dono.name, avatarUrl: dono.avatarUrl } : m;
+  };
   // Este é o estado da CONEXÃO com o canal, não o status de presença. São
   // coisas diferentes: dá pra estar "Disponível" sem estar em canal nenhum.
   const conexao = connecting
@@ -170,18 +208,24 @@ export function Sidebar({
           // No canal em que você está, a sala é a fonte da verdade e chega
           // na hora. Nos outros, o que o servidor viu por último.
           const members: Row[] = active
-            ? peers.map((p) => ({ ...p, live: true }))
-            : (presence[ch.id] ?? []).map((m) => ({
-                ...m,
-                isSpeaking: false,
-                isDeafened: false,
-                isLocal: false,
-                volume: 1,
-                live: false,
-                // Qualidade so existe pra quem esta NA sua sala: fora dela
-                // nao ha conexao ao SFU pra medir.
-                connectionQuality: ConnectionQuality.Unknown,
-              }));
+            ? peers.map((p) => comFotoAtual({ ...p, live: true }))
+            : (presence[ch.id] ?? [])
+                // Você está num canal só. Enquanto o servidor não percebe que
+                // a conexão antiga morreu, ele te devolve nos DOIS — e ver a
+                // si mesmo num canal em que não se está é o mais estranho de
+                // todos. Aqui a resposta é imediata: você sabe onde está.
+                .filter((m) => !(activeChannel && idBase(m.identity) === me.id))
+                .map((m) => comFotoAtual({
+                  ...m,
+                  isSpeaking: false,
+                  isDeafened: false,
+                  isLocal: false,
+                  volume: 1,
+                  live: false,
+                  // Qualidade so existe pra quem esta NA sua sala: fora dela
+                  // nao ha conexao ao SFU pra medir.
+                  connectionQuality: ConnectionQuality.Unknown,
+                }));
 
           return (
             <CanalItem
