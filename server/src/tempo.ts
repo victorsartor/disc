@@ -34,52 +34,29 @@ import { addVoiceTime } from './db.js';
  */
 const TICK_MS = 30_000;
 
-/**
- * O sufixo do ingress do OBS. Ver o userIdFromIdentity do profile.ts.
- *
- * Quem transmite pelo OBS aparece DUAS vezes na sala: a sessão de voz com o
- * id da pessoa, e o ingress com o mesmo id mais este sufixo. São a mesma
- * pessoa, e sem desfazer isso ela contaria o dobro das horas.
- */
-const SUFIXO_OBS = '_obs';
-
 let timer: NodeJS.Timeout | null = null;
 
 /**
  * Quem está em call agora, uma vez cada.
  *
- * Função à parte, e exportada, porque é aqui que mora o erro fácil: quem
- * transmite pelo OBS aparece DUAS vezes na sala (a sessão de voz e o
- * ingress), e somar a lista crua daria o dobro das horas justamente pra
- * quem mais usa o app. Separada assim, dá pra provar que a dedupe funciona
- * sem precisar de alguém numa chamada de verdade.
+ * O Set é o que faz o trabalho: a mesma pessoa aparecendo em duas salas
+ * conta uma hora só. Hoje isso quase não acontece — a presença já devolve
+ * cada pessoa num canal só (ver o `maisRecente` em presence.ts) — mas a soma
+ * das HORAS de alguém não deveria depender de outra função estar certa.
  *
- * O Set também cobre de graça o caso de a mesma pessoa aparecer em duas
- * salas — hoje o app não deixa, mas a soma não deveria depender disso.
+ * Função à parte e exportada pra que a dedupe possa ser provada sem
+ * precisar de gente numa chamada de verdade.
+ *
+ * Até 03/09/2026 ela também desfazia o sufixo `_obs` do ingress, que fazia
+ * quem transmitisse pelo OBS contar o dobro. O OBS saiu do app nessa data e
+ * o sufixo não é mais emitido por ninguém.
  */
 export function pessoasEmCall(canais: Presence): string[] {
   const presentes = new Set<string>();
   for (const membros of Object.values(canais)) {
-    for (const m of membros) presentes.add(semSufixoObs(m.identity));
+    for (const m of membros) presentes.add(m.identity);
   }
   return [...presentes];
-}
-
-/**
- * Desfaz o sufixo do ingress do OBS, com uma condição.
- *
- * Cortar só por "termina em _obs" é frágil por posição: uma identity que
- * fosse literalmente `u_obs` viraria `u`. Hoje isso não acontece — todo id
- * é `u_` mais o sub do Google, que é só dígito — mas depender disso é
- * depender de sorte, e o preço de não depender é uma condição a mais.
- *
- * O que o servidor emite é sempre `<id>_obs` (ver a rota /whip), então
- * exigir que sobre um `u_` com algo depois descreve exatamente o que existe.
- */
-function semSufixoObs(identity: string): string {
-  if (!identity.endsWith(SUFIXO_OBS)) return identity;
-  const base = identity.slice(0, -SUFIXO_OBS.length);
-  return base.startsWith('u_') && base.length > 2 ? base : identity;
 }
 
 /** Uma volta: quem está em call agora ganha mais um tick. */

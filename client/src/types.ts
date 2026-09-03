@@ -225,12 +225,6 @@ export interface RoomTokenResponse {
   channelId: string;
 }
 
-export interface WhipConfig {
-  endpoint: string;
-  bearerToken: string;
-  channelId: string;
-}
-
 export type VoiceMode = 'vad' | 'ptt';
 
 /** Tecla vinculada: keycode do uiohook + como mostrar na tela. */
@@ -505,7 +499,6 @@ export interface DiscApi {
     onProgress(cb: (percent: number) => void): () => void;
   };
   roomToken(channelId: string): Promise<RoomTokenResponse>;
-  whipConfig(channelId: string): Promise<WhipConfig>;
   /**
    * Criar, renomear e apagar canal de voz. Só quem é `me.isAdmin` — o
    * servidor confere de novo (403 pra quem não é), esconder o botão nunca

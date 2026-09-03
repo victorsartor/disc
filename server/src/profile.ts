@@ -77,15 +77,6 @@ const DATA_URL = /^data:([a-z]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/;
  */
 const MAX_BODY_BYTES = 15 * 1024 * 1024;
 
-/**
- * A identidade do LiveKit é o id do usuário — exceto a do ingress do OBS,
- * que ganha sufixo pra não colidir com a sessão de voz. Quem clica no
- * retângulo "(tela)" está clicando na pessoa, então desfazemos o sufixo.
- */
-function userIdFromIdentity(identity: string): string {
-  return identity.endsWith('_obs') ? identity.slice(0, -4) : identity;
-}
-
 function imageUrl(id: string): string {
   return `${config.publicUrl}/api/img/${id}`;
 }
@@ -160,7 +151,7 @@ export function registerProfileRoutes(app: FastifyInstance): void {
     if (!me) return reply.code(401).send({ error: 'não autenticado' });
 
     const { identity } = req.params as { identity: string };
-    const user = findUserById(userIdFromIdentity(identity));
+    const user = findUserById(identity);
     if (!user) return reply.code(404).send({ error: 'pessoa inexistente' });
 
     return { user: publicProfile(user) };

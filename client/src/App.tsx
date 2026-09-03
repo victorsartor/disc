@@ -13,9 +13,8 @@ import { RoomAudio } from './components/RoomAudio';
 import { Chat } from './components/Chat';
 import { ScreenPicker } from './components/ScreenPicker';
 import { Settings } from './components/Settings';
-import { ObsSetup } from './components/ObsSetup';
 import { Profile, UserCard } from './components/Profile';
-import { IconScreen, IconBroadcast, IconEye, IconEyeOff } from './components/Icons';
+import { IconScreen, IconEye, IconEyeOff } from './components/Icons';
 import { DEFAULT_THEME, isThemeId, type ThemeId } from './lib/themes';
 import { playNotify, playMention } from './lib/sounds';
 
@@ -74,7 +73,6 @@ export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [picking, setPicking] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [obsOpen, setObsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   // Identity de quem foi clicado. null = nenhum cartão aberto.
   const [cardIdentity, setCardIdentity] = useState<string | null>(null);
@@ -430,10 +428,9 @@ export function App() {
   /**
    * Clicar numa pessoa. Clicar em VOCÊ abre a aba de edição — é o mesmo
    * gesto, e não faria sentido cair num cartão só de leitura do próprio
-   * perfil. O sufixo do ingress do OBS não é gente: aponta pra mesma pessoa.
+   * perfil.
    */
-  const openUser = useCallback((identity: string) => {
-    const id = identity.endsWith('_obs') ? identity.slice(0, -4) : identity;
+  const openUser = useCallback((id: string) => {
     if (id === me?.id) {
       setCardIdentity(null);
       setProfileOpen(true);
@@ -546,8 +543,8 @@ export function App() {
     [users],
   );
 
-  // Nome do canal ativo — o topbar e o ObsSetup usam. Sai da lista viva, não
-  // do me: um canal renomeado troca de nome no topo sem reiniciar o app.
+  // Nome do canal ativo, pro topo. Sai da lista viva, não do me: um canal
+  // renomeado troca de nome no topo sem reiniciar o app.
   const activeName = channels.find((c) => c.id === room.channelId)?.name ?? null;
 
   // No Linux o seletor e do sistema (ver initDisplayMedia no main): abrir o
@@ -619,15 +616,6 @@ export function App() {
           {room.channelId && <Ping ms={room.ping} />}
           {room.channelId && (
             <>
-              <button
-                className="btn btn--ghost"
-                onClick={() => setObsOpen(true)}
-                title="Transmitir em alta qualidade pelo OBS"
-                style={{ display: 'flex', alignItems: 'center', gap: 7 }}
-              >
-                <IconBroadcast size={15} />
-                OBS
-              </button>
               <button
                 className={`btn ${room.sharing ? 'btn--danger' : 'btn--ghost'}`}
                 onClick={onShareClick}
@@ -714,13 +702,6 @@ export function App() {
         <UserCard identity={cardIdentity} onClose={() => setCardIdentity(null)} />
       )}
 
-      {obsOpen && room.channelId && (
-        <ObsSetup
-          channelId={room.channelId}
-          channelName={activeName ?? room.channelId}
-          onClose={() => setObsOpen(false)}
-        />
-      )}
     </div>
   );
 }

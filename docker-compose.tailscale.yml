@@ -47,31 +47,10 @@ services:
       - "7882:7882/udp"
       - "7881:7881/tcp"
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    logging: *log
-    command: redis-server --save "" --appendonly no
-
-  ingress:
-    image: livekit/ingress:latest
-    restart: unless-stopped
-    logging: *log
-    environment:
-      INGRESS_CONFIG_BODY: |
-        redis:
-          address: redis:6379
-        api_key: ${LIVEKIT_API_KEY}
-        api_secret: ${LIVEKIT_API_SECRET}
-        ws_url: ws://livekit:7880
-        whip_port: 8080
-        rtc_config:
-          udp_port: 7885
-          use_external_ip: false
-          node_ip: ${TAILSCALE_IP}
-    ports:
-      - "7885:7885/udp"
-    depends_on: [redis, livekit]
+  # O ingress do LiveKit (WHIP, pra transmitir pelo OBS) e o redis que ele
+  # exigia sairam em 03/09/2026 junto com a opcao de OBS no app: a ideia era
+  # boa, mas ninguem usava, e os dois containers ficavam de pe o tempo todo.
+  # Pra trazer de volta, ver a memoria "obs-removido".
 
   server:
     build: ./server

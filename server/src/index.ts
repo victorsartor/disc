@@ -167,33 +167,6 @@ app.post('/api/rooms/:channelId/token', async (req, reply) => {
 });
 
 /**
- * Token de ingress WHIP — é o que o OBS usa pra publicar com NVENC.
- * Reaproveita a identidade do usuário, com sufixo pra não colidir com a sessão de voz.
- */
-app.post('/api/rooms/:channelId/whip', async (req, reply) => {
-  const user = await requireUser(req, reply);
-  if (!user) return;
-
-  const { channelId } = req.params as { channelId: string };
-  if (!channelExists(channelId)) {
-    return reply.code(404).send({ error: 'canal inexistente' });
-  }
-
-  const at = new AccessToken(config.livekit.apiKey, config.livekit.apiSecret, {
-    identity: `${user.id}_obs`,
-    name: `${user.name} (tela)`,
-    ttl: '2h',
-  });
-  at.addGrant({ roomJoin: true, room: channelId, canPublish: true, canSubscribe: false });
-
-  return {
-    endpoint: `${config.publicUrl}/whip`,
-    bearerToken: await at.toJwt(),
-    channelId,
-  };
-});
-
-/**
  * Quem está em cada canal, inclusive nos que você não entrou.
  * Serve a lista da sidebar — ver presence.ts.
  */

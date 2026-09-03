@@ -98,7 +98,6 @@ const api = {
     },
   },
   roomToken: (channelId: string) => ipcRenderer.invoke('api:room-token', channelId),
-  whipConfig: (channelId: string) => ipcRenderer.invoke('api:whip-config', channelId),
 
   canais: {
     criar: (nome: string) => ipcRenderer.invoke('api:canal-criar', nome),

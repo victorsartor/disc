@@ -29,16 +29,6 @@ const MAX_NOME_CANAL = 40;
  * saber quem está falando numa sala em que você não entrou. `live` é o que
  * distingue os dois, e é o que decide se a linha aceita ajuste de volume.
  */
-/**
- * O id do usuário por trás de um identity do LiveKit.
- *
- * O ingress do OBS entra com sufixo pra não colidir com a sessão de voz da
- * mesma pessoa — mas o nome e a foto continuam sendo os dela.
- */
-function idBase(identity: string): string {
-  return identity.endsWith('_obs') ? identity.slice(0, -4) : identity;
-}
-
 interface Row {
   identity: string;
   name: string;
@@ -156,7 +146,7 @@ export function Sidebar({
   }, [users, me.id, me.name, me.avatarUrl]);
 
   const comFotoAtual = <T extends { identity: string }>(m: T): T => {
-    const dono = donos.get(idBase(m.identity));
+    const dono = donos.get(m.identity);
     return dono ? { ...m, name: dono.name, avatarUrl: dono.avatarUrl } : m;
   };
   // Este é o estado da CONEXÃO com o canal, não o status de presença. São
@@ -214,7 +204,7 @@ export function Sidebar({
                 // a conexão antiga morreu, ele te devolve nos DOIS — e ver a
                 // si mesmo num canal em que não se está é o mais estranho de
                 // todos. Aqui a resposta é imediata: você sabe onde está.
-                .filter((m) => !(activeChannel && idBase(m.identity) === me.id))
+                .filter((m) => !(activeChannel && m.identity === me.id))
                 .map((m) => comFotoAtual({
                   ...m,
                   isSpeaking: false,

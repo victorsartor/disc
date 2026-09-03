@@ -121,7 +121,7 @@ async function apiFetch(path: string, init: RequestInit = {}): Promise<any> {
   };
   // content-type SO quando existe corpo. Um POST anunciando application/json
   // com corpo vazio e recusado pelo Fastify (FST_ERR_CTP_EMPTY_JSON_BODY),
-  // que e o caso de /token e /whip.
+  // que e o caso do /token.
   if (init.body !== undefined) headers['content-type'] = 'application/json';
 
   const res = await fetch(`${SERVER_URL}${path}`, { ...init, headers });
@@ -578,8 +578,6 @@ ipcMain.handle('api:poll-vote', (_e, id: unknown, options: unknown) =>
   }));
 ipcMain.handle('api:room-token', (_e, channelId: string) =>
   apiFetch(`/api/rooms/${encodeURIComponent(channelId)}/token`, { method: 'POST' }));
-ipcMain.handle('api:whip-config', (_e, channelId: string) =>
-  apiFetch(`/api/rooms/${encodeURIComponent(channelId)}/whip`, { method: 'POST' }));
 
 // --- IPC: canais -------------------------------------------------------
 // O servidor valida nome e confere o admin de novo - aqui e so repasse.

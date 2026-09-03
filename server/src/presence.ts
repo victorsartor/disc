@@ -89,14 +89,6 @@ const TTL_MS = 1500;
 let cache: { at: number; value: Presence } | null = null;
 
 /**
- * O identity do LiveKit é o id do usuário — menos o do ingress do OBS, que
- * ganha sufixo pra não colidir com a sessão de voz da mesma pessoa.
- */
-function idDoUsuario(identity: string): string {
-  return identity.endsWith('_obs') ? identity.slice(0, -4) : identity;
-}
-
-/**
  * Nome e foto saem do BANCO, não do metadata do LiveKit.
  *
  * O metadata é gravado no token, uma vez, quando a pessoa entra na sala — é
@@ -109,7 +101,7 @@ function idDoUsuario(identity: string): string {
  */
 function toMember(p: ParticipantInfo, donos: Map<string, User>): PresenceMember {
   const mic = p.tracks.find((t) => t.source === TrackSource.MICROPHONE);
-  const dono = donos.get(idDoUsuario(p.identity));
+  const dono = donos.get(p.identity);
   return {
     identity: p.identity,
     name: dono?.name || p.name || p.identity,
@@ -175,7 +167,7 @@ export async function presence(): Promise<Presence> {
   const maisRecente = new Map<string, { sala: string; quando: bigint }>();
   for (const [sala, ps] of Object.entries(bruto)) {
     for (const p of ps) {
-      const chave = idDoUsuario(p.identity);
+      const chave = p.identity;
       const atual = maisRecente.get(chave);
       if (!atual || p.joinedAtMs > atual.quando) {
         maisRecente.set(chave, { sala, quando: p.joinedAtMs });
@@ -186,7 +178,7 @@ export async function presence(): Promise<Presence> {
   const out: Presence = {};
   for (const [sala, ps] of Object.entries(bruto)) {
     out[sala] = ps
-      .filter((p) => maisRecente.get(idDoUsuario(p.identity))?.sala === sala)
+      .filter((p) => maisRecente.get(p.identity)?.sala === sala)
       .map((p) => toMember(p, donos));
   }
 

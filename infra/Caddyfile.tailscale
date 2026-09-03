@@ -14,10 +14,6 @@
 		reverse_proxy livekit:7880
 	}
 
-	handle /whip* {
-		reverse_proxy ingress:8080
-	}
-
 	# Feed de atualizacao do app (latest.yml + instalador).
 	#
 	# Sem login, e nao tem como ter: o app checa atualizacao antes de existir
