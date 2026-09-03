@@ -112,6 +112,8 @@ export function Chat({
   const [sending, setSending] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const listaRef = useRef<HTMLDivElement>(null);
+  /** Medido pra que a transmissão flutuante não cubra a caixa de escrever. */
+  const composerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** Preso no fim. Só um gesto da PESSOA solta — ver conferirPino. */
   const pinnedRef = useRef(true);
@@ -385,6 +387,37 @@ export function Chat({
   }, [messages.length]);
 
   /**
+   * Publica a altura do composer como --composer-h.
+   *
+   * Quem lê são as transmissões flutuantes (.flutuantes no theme.css), que
+   * param onde ele começa: a janelinha pode cobrir a conversa — dá pra rolar
+   * — mas nunca a caixa de escrever, que é o único lugar da tela onde se
+   * está prestes a digitar.
+   *
+   * Medido, e não um número fixo, porque o composer cresce sozinho: o
+   * textarea sobe com as linhas, e a barra de "respondendo a" e o anexo
+   * pendente entram e saem por cima dele.
+   */
+  useLayoutEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+
+    const observador = new ResizeObserver(() => {
+      document.documentElement.style.setProperty(
+        '--composer-h',
+        `${Math.round(el.getBoundingClientRect().height)}px`,
+      );
+    });
+    observador.observe(el);
+    return () => {
+      observador.disconnect();
+      // Sem isto a última altura medida sobrevive ao Chat desmontado, e a
+      // próxima tela que usar a variável herda um valor sem dono.
+      document.documentElement.style.removeProperty('--composer-h');
+    };
+  }, []);
+
+  /**
    * Cria a enquete como uma mensagem sem corpo.
    *
    * A pergunta É o texto do balão — repeti-la no corpo só daria a mesma
@@ -605,7 +638,7 @@ export function Chat({
 
       {ampliada && <Lightbox anexo={ampliada} onFechar={() => setAmpliada(null)} />}
 
-      <div className="chat__composer">
+      <div className="chat__composer" ref={composerRef}>
         {erro && <div className="chat__erro">{erro}</div>}
 
         {/* Fica ACIMA do anexo pendente: a ordem na tela é a ordem em que

@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RemoteTrack } from 'livekit-client';
-import { MAX_ASSISTINDO, type AudioFeed, type ScreenFeed } from '../lib/useRoom';
+import { type AudioFeed, type ScreenFeed } from '../lib/useRoom';
+import { CANTOS, type TelaCanto } from '../types';
 import {
   IconBroadcast, IconHeadphones, IconHeadphonesOff,
-  IconFullscreen, IconFullscreenExit, IconClose, IconEye, IconEyeOff,
+  IconFullscreen, IconFullscreenExit, IconEye,
 } from './Icons';
 
 interface Props {
@@ -18,7 +19,37 @@ interface Props {
   localScreen: MediaStreamTrack | null;
   /** Quando a SUA transmissão começou. null = você não está compartilhando. */
   shareStartedAt: number | null;
+  /** Canto salvo, já validado pelo processo main. */
+  canto: TelaCanto;
+  /** Largura salva, já validada pelo processo main. */
+  largura: number;
+  /** Chamado UMA vez, ao soltar — não a cada quadro do gesto. */
+  onCanto: (canto: TelaCanto) => void;
+  onLargura: (px: number) => void;
 }
+
+/**
+ * Limites da largura da janelinha.
+ *
+ * São os mesmos de electron/settings.ts, de propósito repetidos, pelo mesmo
+ * motivo do SidebarResizer: aquele é o portão que protege o settings.json
+ * (patch vindo por IPC é entrada não confiável), este é o que segura o
+ * arrasto na tela. Se um dia divergirem, quem manda é o de lá.
+ */
+const MIN = 240;
+const MAX = 720;
+
+/** O de fábrica, que o duplo clique na alça devolve. Igual ao DEFAULTS. */
+const PADRAO = 360;
+
+/**
+ * Quanto o ponteiro precisa andar pra virar arrasto, em pixels.
+ *
+ * Sem esta folga, a mão que treme no clique do botão direito (que abre o
+ * volume) sairia arrastando a pilha junto — e o menu nasceria com a
+ * transmissão já no meio do caminho pra outro canto.
+ */
+const FOLGA = 4;
 
 /**
  * "07:12" até uma hora; "1:07:12" depois dela.
@@ -69,21 +100,40 @@ interface Aberto {
   y: number;
 }
 
+/**
+ * As transmissões, numa pilha flutuante por cima do chat.
+ *
+ * Não há mais palco: até a 0.38 isto era um irmão do chat e dividia altura
+ * com ele (flex 3 contra 2), então quem compartilhasse custava metade da
+ * janela a todo mundo — inclusive a quem só queria ler a conversa. Agora as
+ * janelinhas flutuam num canto e o chat fica inteiro embaixo.
+ *
+ * A pilha tem UM canto e UMA largura pra todas: arrastar move o conjunto, e
+ * ao soltar ele gruda no canto mais perto. Canto e tamanho por transmissão
+ * fariam duas se cruzarem na tela sem ninguém ter pedido isso.
+ *
+ * Ver grande continua existindo, mas agora é a tela cheia de verdade (duplo
+ * clique ou o botão do canto) — o estado intermediário "ampliado", que
+ * ocupava o palco todo, foi junto com o palco.
+ */
 export function Stage({
   screens, audios, screenVolumes, onScreenVolume, onParar, localScreen, shareStartedAt,
+  canto, largura, onCanto, onLargura,
 }: Props) {
   // Uma por vez: abrir noutro quadro fecha a anterior sozinho.
   const [aberto, setAberto] = useState<Aberto | null>(null);
-  /** Identity da transmissão aberta em grande. null = todas em miniatura. */
-  const [ampliado, setAmpliado] = useState<string | null>(null);
+  const pilhaRef = useRef<HTMLDivElement>(null);
 
-  // Quem parou de transmitir enquanto estava ampliado não pode deixar o
-  // palco preso numa transmissão que não existe mais.
+  const [arrastando, setArrastando] = useState(false);
+  const [medindo, setMedindo] = useState(false);
+  /** Onde o gesto começou, e se ele já passou da FOLGA pra virar arrasto. */
+  const gesto = useRef<{ x: number; y: number; moveu: boolean } | null>(null);
+  /** Onde a largura parou. O pointerup não traz a posição do mouse. */
+  const larguraRef = useRef(largura);
+
   useEffect(() => {
-    if (ampliado && !screens.some((s) => s.identity === ampliado)) {
-      setAmpliado(null);
-    }
-  }, [ampliado, screens]);
+    if (!medindo) larguraRef.current = largura;
+  }, [largura, medindo]);
 
   // Fechar clicando fora e no Escape. Sem isto a caixinha só sairia da tela
   // clicando de novo exatamente no mesmo quadro.
@@ -99,36 +149,173 @@ export function Stage({
     };
   }, [aberto]);
 
-  if (screens.length === 0 && !localScreen) return null;
+  // ── Arrastar a pilha ───────────────────────────────────────────────────
+  // Como no SidebarResizer, o gesto NÃO passa por estado do React: cada
+  // movimento escreve direto no transform. Re-renderizar a árvore a 60fps
+  // arrastaria o <video> junto, e o vídeo é o que não pode piscar.
+  useEffect(() => {
+    if (!arrastando) return;
+    const pilha = pilhaRef.current;
+    const area = pilha?.parentElement;
+    if (!pilha || !area) return;
 
-  const grande = ampliado ? screens.find((s) => s.identity === ampliado) : null;
+    const onMove = (e: PointerEvent) => {
+      const g = gesto.current;
+      if (!g) return;
+      const dx = e.clientX - g.x;
+      const dy = e.clientY - g.y;
+      // Antes da folga não mexe em nada: um tremor no clique não pode
+      // parecer o começo de um arrasto.
+      if (!g.moveu && Math.hypot(dx, dy) < FOLGA) return;
+      g.moveu = true;
+      pilha.style.transform = `translate(${dx}px, ${dy}px)`;
+    };
+
+    const onUp = () => {
+      setArrastando(false);
+      const g = gesto.current;
+      gesto.current = null;
+      if (!g?.moveu) {
+        pilha.style.transform = '';
+        return;
+      }
+
+      // Medir ANTES de limpar o transform: depois de limpo a pilha já
+      // voltou pro canto antigo e a conta daria sempre ele.
+      const r = pilha.getBoundingClientRect();
+      const a = area.getBoundingClientRect();
+      const fx = (r.left + r.width / 2 - a.left) / Math.max(1, a.width);
+      const fy = (r.top + r.height / 2 - a.top) / Math.max(1, a.height);
+
+      let melhor = canto;
+      let perto = Infinity;
+      for (const [nome, p] of Object.entries(CANTOS)) {
+        const d = (fx - p.x) ** 2 + (fy - p.y) ** 2;
+        if (d < perto) {
+          perto = d;
+          melhor = nome as TelaCanto;
+        }
+      }
+      if (melhor !== canto) onCanto(melhor);
+
+      // Um quadro depois, e não agora: a classe --arrastando (que desliga a
+      // transição) só sai no render deste setArrastando, e zerar o transform
+      // antes disso faria a pilha TELEPORTAR pro canto em vez de deslizar
+      // até ele. É o deslize que conta que o gesto grudou em algum canto.
+      requestAnimationFrame(() => {
+        pilha.style.transform = '';
+      });
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [arrastando, canto, onCanto]);
+
+  // ── Redimensionar pela quina ───────────────────────────────────────────
+  useEffect(() => {
+    if (!medindo) return;
+    const pilha = pilhaRef.current;
+    if (!pilha) return;
+
+    // Ancorada à direita, a quina de puxar aponta pra ESQUERDA da tela: ali
+    // arrastar pra esquerda é que aumenta. À esquerda, o contrário.
+    const sinal = CANTOS[canto].x === 1 ? -1 : 1;
+    const inicioX = gesto.current?.x ?? 0;
+    const inicioW = larguraRef.current;
+
+    const onMove = (e: PointerEvent) => {
+      const px = Math.round(
+        Math.min(MAX, Math.max(MIN, inicioW + sinal * (e.clientX - inicioX))),
+      );
+      larguraRef.current = px;
+      document.documentElement.style.setProperty('--tela-w', `${px}px`);
+    };
+    const onUp = () => {
+      setMedindo(false);
+      gesto.current = null;
+      onLargura(larguraRef.current);
+    };
+
+    // A diagonal do cursor segue a quina: nos cantos em que ela aponta pra
+    // baixo-direita ou cima-esquerda é a "\", nos outros dois a "/".
+    const diag = CANTOS[canto].x === CANTOS[canto].y ? 'app--diag-nwse' : 'app--diag-nesw';
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    document.body.classList.add(diag);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      document.body.classList.remove(diag);
+    };
+  }, [medindo, canto, onLargura]);
+
+  const pegar = useCallback((e: React.PointerEvent) => {
+    // Só o botão esquerdo: o direito abre o volume, e o do meio cola no Linux.
+    if (e.button !== 0) return;
+    // Botão é botão: parar de assistir e tela cheia não podem virar arrasto.
+    if ((e.target as HTMLElement).closest('button, .pilha__alca')) return;
+    gesto.current = { x: e.clientX, y: e.clientY, moveu: false };
+    setArrastando(true);
+  }, []);
+
+  if (screens.length === 0 && !localScreen) return null;
 
   const menuVolume = (identity: string) => (e: React.MouseEvent) => {
     e.preventDefault();
     setAberto({ identity, x: e.clientX, y: e.clientY });
   };
 
-  // Uma transmissão ocupa o palco todo; duas dividem em COLUNAS. Empilhar
-  // seria dar a cada uma metade da altura, que é a dimensão escassa aqui —
-  // as telas são largas, e é a altura que decide se dá pra ler alguma coisa.
-  const colunas = grande ? 1 : Math.min(screens.length, 2);
-
   return (
-    <div className={`stage${grande ? ' stage--ampliado' : ''}${colunas === 2 ? ' stage--duas' : ''}`}>
-      {(grande ? [grande] : screens).map((s) => (
-        <Quadro
-          key={s.identity}
-          nome={s.name}
-          track={s.track}
-          startedAt={s.startedAt}
-          ampliado={Boolean(grande)}
-          onAmpliar={() => setAmpliado(grande ? null : s.identity)}
-          onParar={() => onParar(s.identity)}
-          onVolume={menuVolume(s.identity)}
-        />
-      ))}
+    <div className="flutuantes">
+      <div
+        ref={pilhaRef}
+        className={
+          `pilha pilha--${canto}` +
+          (arrastando ? ' pilha--arrastando' : '') +
+          (medindo ? ' pilha--medindo' : '')
+        }
+        onPointerDown={pegar}
+      >
+        {screens.map((s) => (
+          <Quadro
+            key={s.identity}
+            nome={s.name}
+            track={s.track}
+            startedAt={s.startedAt}
+            onParar={() => onParar(s.identity)}
+            onVolume={menuVolume(s.identity)}
+          />
+        ))}
 
-      {localScreen && <MeuPreview track={localScreen} startedAt={shareStartedAt} />}
+        {localScreen && <MeuPreview track={localScreen} startedAt={shareStartedAt} />}
+
+        {/* Na quina que aponta pra dentro da janela: encostada na borda ela
+            ficaria em cima da moldura da própria pilha, e metade da alça
+            cairia fora da área clicável. */}
+        <div
+          className="pilha__alca"
+          role="separator"
+          aria-label="Tamanho da transmissão"
+          title="Arraste para mudar o tamanho — clique duas vezes para o padrão"
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            gesto.current = { x: e.clientX, y: e.clientY, moveu: true };
+            setMedindo(true);
+          }}
+          onDoubleClick={() => {
+            larguraRef.current = PADRAO;
+            document.documentElement.style.setProperty('--tela-w', `${PADRAO}px`);
+            onLargura(PADRAO);
+          }}
+        />
+      </div>
 
       {aberto && (
         <ScreenVolume
@@ -152,22 +339,22 @@ export function Stage({
 /**
  * Uma transmissão que você está assistindo.
  *
- * Três tamanhos, e os botões do canto levam de um pro outro: miniatura
- * (dividindo o palco com as outras) → ampliada (o palco todo, com o chat
- * ainda embaixo) → tela cheia de verdade, pelo fullscreen do sistema.
+ * Dois tamanhos agora, e não três: a janelinha na pilha e a tela cheia de
+ * verdade. O estado do meio ("ampliada", ocupando o palco todo) saiu junto
+ * com o palco — ele existia pra dar ao vídeo mais espaço que a miniatura sem
+ * cobrir o app inteiro, e é exatamente esse meio-termo que a janelinha
+ * redimensionável passou a resolver melhor.
  *
- * Os botões moram no mesmo canto e aparecem juntos no passar do mouse:
- * fechar a live, ampliar e tela cheia são a mesma família de decisão, e
- * espalhá-los pela tela era o que deixava o clique longe do que ele afeta.
+ * Duplo clique leva pra tela cheia. É o gesto que todo player de vídeo já
+ * tem, e aqui ele não disputa com nada: o clique simples arrasta a pilha, e
+ * arrastar precisa da FOLGA de qualquer jeito.
  */
 function Quadro({
-  nome, track, startedAt, ampliado = false, onAmpliar, onParar, onVolume,
+  nome, track, startedAt, onParar, onVolume,
 }: {
   nome: string;
   track: RemoteTrack;
   startedAt: number;
-  ampliado?: boolean;
-  onAmpliar: () => void;
   onParar: () => void;
   onVolume: (e: React.MouseEvent) => void;
 }) {
@@ -183,31 +370,20 @@ function Quadro({
     return () => document.removeEventListener('fullscreenchange', sync);
   }, []);
 
-  // Escape volta da ampliada — mas só quando NÃO está em tela cheia, senão o
-  // primeiro Escape faria as duas coisas de uma vez.
-  useEffect(() => {
-    if (!ampliado) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !document.fullscreenElement) onAmpliar();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [ampliado, onAmpliar]);
-
   const alternarCheia = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void caixaRef.current?.requestFullscreen().catch(() => {
-      /* recusado: fica do tamanho que está, que já é a maior parte da janela */
+      /* recusado: fica do tamanho que está, e a pilha continua arrastável */
     });
   };
 
   return (
     <div
       ref={caixaRef}
-      className={ampliado ? 'quadro quadro--ampliado' : 'quadro quadro--mini'}
-      onClick={ampliado ? undefined : onAmpliar}
+      className="quadro"
+      onDoubleClick={alternarCheia}
       onContextMenu={onVolume}
-      title={ampliado ? undefined : 'Clique para abrir; botão direito para o volume'}
+      title="Arraste para mover; dois cliques para tela cheia; botão direito para o volume"
     >
       <VideoTile track={track} />
 
@@ -217,9 +393,7 @@ function Quadro({
         <Cronometro desde={startedAt} />
       </div>
 
-      {/* O clique nos botões não pode subir pro quadro: ele ampliaria a
-          transmissão no mesmo gesto que fecha ou põe em tela cheia. */}
-      <div className="quadro__acoes" onClick={(e) => e.stopPropagation()}>
+      <div className="quadro__acoes">
         <button className="quadro__btn" onClick={onParar} title={`Parar de assistir ${nome}`}>
           <IconEye size={16} />
         </button>
@@ -230,23 +404,22 @@ function Quadro({
         >
           {cheia ? <IconFullscreenExit size={16} /> : <IconFullscreen size={16} />}
         </button>
-        {ampliado && !cheia && (
-          <button className="quadro__btn" onClick={onAmpliar} title="Voltar pra miniatura">
-            <IconClose size={16} />
-          </button>
-        )}
       </div>
     </div>
   );
 }
 
 /**
- * O seu próprio compartilhamento, em miniatura.
+ * O seu próprio compartilhamento.
  *
- * Serve só pra conferir que está indo o que você acha que está indo — daí
- * ficar no canto, por cima, sem tirar espaço de quem se está assistindo. Vem
- * da mesma faixa que sobe pro servidor, então o que aparece aqui é
- * literalmente o que os outros recebem.
+ * Serve só pra conferir que está indo o que você acha que está indo. Vem da
+ * mesma faixa que sobe pro servidor, então o que aparece aqui é literalmente
+ * o que os outros recebem.
+ *
+ * Agora é mais um item da pilha, com a mesma moldura dos outros: quando ele
+ * era o único flutuante do app tinha classe própria e um canto só dele, e
+ * duas coisas com a mesma cara em cantos diferentes davam a impressão de que
+ * uma delas tinha travado.
  */
 function MeuPreview({
   track, startedAt,
@@ -266,10 +439,10 @@ function MeuPreview({
   }, [track]);
 
   return (
-    <div className="preview" title="O que você está compartilhando">
+    <div className="quadro quadro--meu" title="O que você está compartilhando">
       {/* Mudo obrigatoriamente: é o som que já está saindo da sua máquina. */}
       <video ref={ref} autoPlay playsInline muted />
-      <div className="preview__label">
+      <div className="quadro__label">
         Você está compartilhando
         {startedAt !== null && <Cronometro desde={startedAt} />}
       </div>

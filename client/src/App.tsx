@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Channel, Me, Message, NovaEnquete, Poll, UserProfile } from './types';
+import type {
+  Channel, Me, Message, NovaEnquete, Poll, TelaCanto, UserProfile,
+} from './types';
 import { MAX_ASSISTINDO, useRoom } from './lib/useRoom';
 import { usePresence, useStatus } from './lib/usePresence';
 import { useUpdate, blocksApp } from './lib/useUpdate';
@@ -358,6 +360,27 @@ export function App() {
     void room.updateSettings({ sidebarWidth: px });
   }, [room]);
 
+  // O canto e o tamanho da transmissão flutuante seguem exatamente o mesmo
+  // desenho da largura acima: valor no settings.json, o CSS desenhando a
+  // partir de uma variável no <html>, e o gesto escrevendo nela por fora do
+  // React (ver Stage.tsx). A dependência só muda quando o settings.json
+  // muda, nunca no meio de um arrasto — é isso que evita o salto ao soltar.
+  const telaCanto = room.settings?.telaCanto ?? 'baixo-dir';
+  const telaLargura = room.settings?.telaLargura ?? 360;
+
+  useEffect(() => {
+    if (!settingsCarregou) return;
+    document.documentElement.style.setProperty('--tela-w', `${telaLargura}px`);
+  }, [telaLargura, settingsCarregou]);
+
+  const salvarCanto = useCallback((c: TelaCanto) => {
+    void room.updateSettings({ telaCanto: c });
+  }, [room]);
+
+  const salvarTelaLargura = useCallback((px: number) => {
+    void room.updateSettings({ telaLargura: px });
+  }, [room]);
+
   const { channels: presence, users, canais } = usePresence(Boolean(loggedIn), room.channelId);
 
   /**
@@ -625,6 +648,10 @@ export function App() {
           onParar={room.toggleAssistir}
           localScreen={room.localScreen}
           shareStartedAt={room.shareStartedAt}
+          canto={telaCanto}
+          largura={telaLargura}
+          onCanto={salvarCanto}
+          onLargura={salvarTelaLargura}
         />
         <Chat
           messages={messages}

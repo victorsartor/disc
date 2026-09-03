@@ -246,6 +246,19 @@ textarea {
   cursor: col-resize !important;
 }
 
+/* Mesma ideia para a quina da transmissão flutuante, só que na diagonal —
+   e são duas porque a quina de puxar troca de lado com o canto em que a
+   pilha está ancorada (ver .pilha__alca). */
+.app--diag-nwse,
+.app--diag-nwse * {
+  cursor: nwse-resize !important;
+}
+
+.app--diag-nesw,
+.app--diag-nesw * {
+  cursor: nesw-resize !important;
+}
+
 .sidebar__brand {
   height: var(--topbar-h);
   flex-shrink: 0;
@@ -632,6 +645,9 @@ textarea {
   min-width: 0;
   min-height: 0;
   background: var(--level-1);
+  /* Âncora das transmissões flutuantes, que moram por cima do chat sem
+     ocupar linha nenhuma do fluxo. Ver .flutuantes. */
+  position: relative;
 }
 
 .topbar {
@@ -658,46 +674,199 @@ textarea {
   flex: 1;
 }
 
-/* ── Palco (telas compartilhadas) ────────────────────────────────────── */
-/* O palco divide a altura com o chat em vez de ter um teto fixo.
-   `min-height: 0` é o que permite ele ENCOLHER de verdade dentro do flex —
-   sem isso o quadro empurra o resto pra fora e a parte de baixo da tela
-   compartilhada some. */
-.stage {
-  position: relative;
-  background: var(--level-0);
-  border-bottom: 1px solid var(--line);
-  padding: 12px;
-  display: grid;
+/* ── Transmissões flutuantes ─────────────────────────────────────────────
+   Não há mais palco. Até a 0.38 as telas compartilhadas eram um irmão do
+   chat e dividiam altura com ele, então quem compartilhasse custava metade
+   da janela a TODO MUNDO — inclusive a quem só queria ler a conversa. Agora
+   flutuam num canto e o chat fica com a altura inteira embaixo.
+
+   A área começa embaixo da barra do canal e para onde o composer começa: a
+   janelinha nunca cobre a caixa de escrever, que é o único lugar da tela em
+   que se está prestes a digitar. */
+.flutuantes {
+  position: absolute;
+  top: var(--topbar-h);
+  left: 0;
+  right: 0;
+  bottom: var(--composer-h, 76px);
+  z-index: 20;
+  /* O overlay é só a moldura de referência do arrasto; quem recebe clique é
+     a pilha. Sem isto, uma faixa invisível cobriria a conversa inteira e
+     nem selecionar texto daria mais. */
+  pointer-events: none;
+}
+
+.pilha {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  /* Uma coluna por padrão: transmissão sozinha ocupa o palco inteiro. Duas
-     viram duas colunas (.stage--duas). Nunca empilha — a altura é a dimensão
-     escassa aqui, e partir ela ao meio é o que torna a tela ilegível. */
-  grid-template-columns: 1fr;
-  grid-auto-rows: 1fr;
-  flex: 3 1 0;
-  min-height: 0;
+  pointer-events: auto;
+  /* Teto real da pilha. Duas transmissões mais o seu próprio preview, no
+     tamanho máximo, somam mais altura do que a janela tem — sem este teto a
+     de baixo sairia por trás do composer. Quem cede é a altura dos quadros
+     (ver o flex-shrink lá), e o `contain` do vídeo cuida do resto. */
+  max-height: calc(100% - 32px);
+  /* Volta pro canto com um movimento curto em vez de teleportar: é o que
+     mostra que o gesto GRUDOU num canto, e não que a janelinha ficou onde a
+     mão soltou. Ver o ease-out do DESIGN.md — entrada é sempre ease-out. */
+  transition: transform 0.18s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-.stage--duas {
-  grid-template-columns: 1fr 1fr;
+/* Durante o gesto quem manda é o ponteiro: com a transição ligada a pilha
+   correria ATRÁS do mouse com 180ms de atraso. */
+.pilha--arrastando,
+.pilha--medindo {
+  transition: none;
 }
 
-/* Sem aspect-ratio de propósito. Forçar 16/9 deixava o quadro mais alto que
-   a faixa disponível, e o excedente era cortado embaixo — pior ainda em tela
-   de proporção diferente. Agora o quadro ocupa exatamente o que existe, e o
-   `object-fit: contain` do vídeo garante a tela inteira dentro dele. */
+/* O cursor tem que vir daqui E do quadro: o filho ganha do pai, então sem a
+   segunda regra a mão continuaria aberta durante o arrasto inteiro. */
+.pilha--arrastando,
+.pilha--arrastando .quadro {
+  cursor: grabbing;
+}
+
+.pilha--arrastando {
+  /* Deixa entrever o que está embaixo enquanto se escolhe o canto. */
+  opacity: 0.86;
+}
+
+.pilha--cima-esq {
+  top: 16px;
+  left: 16px;
+}
+.pilha--cima-dir {
+  top: 16px;
+  right: 16px;
+}
+/* Ancorada embaixo, a pilha cresce PRA CIMA sozinha: é o próprio `bottom`
+   que segura a base, então uma transmissão nova empurra as outras pra longe
+   da borda em vez de pra dentro do composer. */
+.pilha--baixo-esq {
+  bottom: 16px;
+  left: 16px;
+}
+.pilha--baixo-dir {
+  bottom: 16px;
+  right: 16px;
+}
+
+/* ── A quina de puxar o tamanho ──────────────────────────────────────────
+   Fica na quina que aponta pra DENTRO da janela, que é a única das quatro
+   com espaço livre à frente: encostada na borda, metade dela cairia fora da
+   área clicável. Por isso a posição muda com o canto, e a diagonal do
+   cursor junto. */
+.pilha__alca {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  z-index: 2;
+}
+
+.pilha--cima-esq .pilha__alca {
+  right: -4px;
+  bottom: -4px;
+  cursor: nwse-resize;
+}
+.pilha--cima-dir .pilha__alca {
+  left: -4px;
+  bottom: -4px;
+  cursor: nesw-resize;
+}
+.pilha--baixo-esq .pilha__alca {
+  right: -4px;
+  top: -4px;
+  cursor: nesw-resize;
+}
+.pilha--baixo-dir .pilha__alca {
+  left: -4px;
+  top: -4px;
+  cursor: nwse-resize;
+}
+
+/* Duas riscas curtas, como todo canto de redimensionar. Só aparecem com o
+   mouse na pilha: são enfeite de controle, e enfeite de controle em cima de
+   vídeo o tempo todo é sujeira. */
+.pilha__alca::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 2px;
+  background: var(--alabaster);
+  opacity: 0;
+  transition: opacity 0.13s;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%, 0 72%, 72% 72%, 72% 0);
+}
+
+.pilha:hover .pilha__alca::after,
+.pilha--medindo .pilha__alca::after {
+  opacity: 0.55;
+}
+
+/* A risca aponta pro lado pra onde a quina cresce — uma regra por canto, e
+   não três que se sobrescrevem: com cascata a ordem vira a explicação, e
+   quem mexer numa não tem como saber que estava consertando outra. */
+.pilha--cima-dir .pilha__alca::after {
+  transform: scaleX(-1);
+}
+.pilha--baixo-dir .pilha__alca::after {
+  transform: scaleY(-1);
+}
+.pilha--baixo-esq .pilha__alca::after {
+  transform: scale(-1, -1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pilha {
+    transition: none;
+  }
+}
+
+/* Agora o aspect-ratio É o certo, ao contrário de quando isto morava no
+   palco: lá a altura era escassa e forçar 16/9 cortava o quadro por baixo;
+   aqui a janelinha é dona da própria caixa, e sem uma proporção fixa a pilha
+   mudaria de altura a cada transmissão que entra. O `contain` do vídeo
+   continua garantindo a tela inteira dentro dela, com tarja onde sobra. */
 .quadro {
   position: relative;
+  /* O `min` é o que segura a janelinha numa janela estreita: sem ele a
+     largura salva continuaria valendo e a transmissão sairia por fora. */
+  width: min(var(--tela-w, 360px), 100%);
+  aspect-ratio: 16 / 9;
+  /* Encolhe em altura, e só quando a pilha bate no teto (ver .pilha). O
+     aspect-ratio manda enquanto sobra espaço; passando disso, é melhor um
+     quadro mais achatado do que um que vaza pra fora da área. */
+  flex-shrink: 1;
+  min-height: 0;
   /* Preto puro, e não --level-0: isto é a tarja do letterbox que sobra em
      volta do `object-fit: contain`. Um fundo azulado ali vira moldura
      colorida em torno de toda tela compartilhada. Fora da paleta de
      propósito — é superfície de mídia, não de interface. */
   background: #000;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   overflow: hidden;
-  min-height: 0;
+  /* Flutua sobre a conversa, então precisa se descolar dela — é o único
+     lugar do app com sombra de verdade em vez de contorno, e é porque aqui
+     a profundidade é literal: tem texto passando por baixo. */
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  cursor: grab;
+}
+
+/* Em tela cheia a janelinha vira a tela: largura fixa e proporção deixariam
+   uma caixa de 360px no meio de um fundo preto. */
+/* Em tela cheia a janelinha VIRA a tela: largura fixa e proporção deixariam
+   uma caixa de 360px no meio de um fundo preto, e o arredondado, o contorno
+   e a sombra viram moldura no meio do nada. A mão de arrastar também sai —
+   não há canto nenhum pra onde levar isto aqui. */
+.quadro:fullscreen {
+  width: 100%;
+  aspect-ratio: auto;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: default;
 }
 
 .quadro video {
@@ -705,6 +874,9 @@ textarea {
   height: 100%;
   object-fit: contain;
   display: block;
+  /* O vídeo não pega o gesto: sem isto o arrasto morre no <video>, que tem
+     tratamento próprio de ponteiro em alguns drivers. */
+  pointer-events: none;
 }
 
 .quadro__label {
@@ -750,6 +922,9 @@ textarea {
 .volpop {
   position: fixed;
   z-index: 40;
+  /* Mora dentro do .flutuantes, que não recebe ponteiro — sem devolver aqui,
+     o slider do volume não responderia ao arrasto. */
+  pointer-events: auto;
   padding: 12px;
   background: var(--level-3);
   background-image: linear-gradient(var(--glass), var(--glass));
@@ -808,10 +983,11 @@ textarea {
 }
 
 /* ── Chat ────────────────────────────────────────────────────────────── */
-/* 2 contra os 3 do palco: com alguém transmitindo, o vídeo manda. Sem
-   ninguém, o Stage nem renderiza e o chat fica com tudo. */
+/* A altura inteira, sempre. Antes eram 2 contra os 3 do palco, e quem
+   compartilhasse tirava mais da metade da janela de todo mundo; hoje a
+   transmissão flutua por cima e não disputa espaço com a conversa. */
 .chat {
-  flex: 2 1 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -824,7 +1000,10 @@ textarea {
 .chat__descer {
   position: absolute;
   right: 20px;
-  bottom: 72px;
+  /* Logo acima do composer, que muda de altura com as linhas do textarea e
+     com a barra de "respondendo a". Quem mede e publica a variável é o
+     próprio Chat; o 72px é só o palpite do primeiro quadro. */
+  bottom: calc(var(--composer-h, 72px) + 8px);
   z-index: 2;
   display: flex;
   align-items: center;
@@ -2835,64 +3014,12 @@ textarea {
 
 
 
-/* ── Preview do que EU estou compartilhando ──────────────────────────────
-   Pequeno de propósito: é conferência, não conteúdo. Fica fora da grade,
-   ancorado no canto, pra não roubar espaço de quem se está assistindo. */
-.preview {
-  position: absolute;
-  right: 20px;
-  bottom: 20px;
-  z-index: 30;
-  width: 280px;
-  border-radius: var(--radius);
-  overflow: hidden;
-  border: 1px solid var(--line-strong);
-  background: #000; /* letterbox — ver .quadro */
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-  pointer-events: none;
-}
-
-.preview video {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: contain;
-  display: block;
-}
-
-.preview__label {
-  padding: 4px 8px;
-  font-size: 10.5px;
+/* O seu próprio compartilhamento tem a mesma moldura dos outros — só a
+   etiqueta muda de tom, porque "Você está compartilhando" é conferência e
+   não conteúdo, e não deve competir com o nome de quem você assiste. */
+.quadro--meu .quadro__label {
   color: var(--lavender);
-  background: var(--level-2);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-/* O mesmo cronômetro do quadro, na escala do preview. */
-.preview__label .quadro__tempo {
-  margin-left: auto;
-  padding-left: 8px;
-}
-
-/* ── Quadro de transmissão ───────────────────────────────────────────────
-   Miniatura e ampliado são o mesmo elemento em dois tamanhos: quem manda no
-   tamanho é a grade do palco, não o quadro. */
-.quadro--mini {
-  cursor: pointer;
-}
-
-.stage--ampliado {
-  grid-template-columns: 1fr;
-  /* Come o espaço do chat sem fazê-lo sumir: ele continua ali embaixo,
-     em algumas linhas. */
-  flex: 8 1 0;
-}
-
-/* Em tela cheia o arredondado e o contorno viram moldura no meio do nada. */
-.quadro:fullscreen {
-  border: none;
-  border-radius: 0;
+  font-weight: 400;
 }
 
 .quadro__acoes {
@@ -2929,42 +3056,9 @@ textarea {
   background: var(--level-3);
 }
 
-/* ── Transmissão que você fechou ─────────────────────────────────────────
-   Guarda o lugar de quem está no ar sem baixar um quadro sequer: é daqui
-   que se reabre. */
-.quadro--fechado {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: var(--level-2);
-  border: 1px dashed var(--line-strong);
-  color: var(--lavender);
-  text-align: center;
-  padding: 20px;
-  transition: color 0.12s, border-color 0.12s;
-}
-
-.quadro--fechado:hover {
-  color: var(--alabaster);
-  border-color: var(--accent);
-}
-
-.quadro__fechado-nome {
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.quadro__fechado-dica {
-  font-size: 11.5px;
-  opacity: 0.75;
-}
-
 /* ── Quem está transmitindo, na barra de cima ────────────────────────────
-   Mora ao lado do nome da sala porque é informação sobre a SALA. No palco
-   ela ocupava uma linha da grade, e como as linhas ali têm todas a mesma
-   altura, isso deixava a transmissão com metade do espaço. */
+   Mora ao lado do nome da sala porque é informação sobre a SALA — e é por
+   ela que se reabre uma transmissão fechada pelo olho do quadro. */
 .lives {
   display: flex;
   align-items: center;

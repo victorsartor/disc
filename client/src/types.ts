@@ -254,6 +254,29 @@ export const ROTULO_DA_ACAO = {
   surdo: 'Surdo',
 } satisfies Record<AcaoDeAtalho, string>;
 
+/**
+ * Os cantos em que a pilha de transmissões pode ancorar.
+ *
+ * Espelha TELA_CANTOS em electron/settings.ts, que é quem manda — o
+ * `satisfies` do CANTOS logo abaixo impede as duas listas de divergirem em
+ * silêncio.
+ */
+export type TelaCanto = 'cima-esq' | 'cima-dir' | 'baixo-esq' | 'baixo-dir';
+
+/**
+ * Onde cada canto fica, em fração da área: 0 é o começo do eixo, 1 é o fim.
+ *
+ * É desta tabela que sai o "gruda no mais perto" — com ela a conta é a
+ * distância do centro da pilha até cada um dos quatro pontos, e não uma
+ * escada de if comparando metades de largura e de altura.
+ */
+export const CANTOS = {
+  'cima-esq': { x: 0, y: 0 },
+  'cima-dir': { x: 1, y: 0 },
+  'baixo-esq': { x: 0, y: 1 },
+  'baixo-dir': { x: 1, y: 1 },
+} satisfies Record<TelaCanto, { x: number; y: number }>;
+
 export interface Settings {
   voiceMode: VoiceMode;
   pttKeycode: number | null;
@@ -322,6 +345,21 @@ export interface Settings {
    * e são reaplicados lá: o que sai daqui é pedido, não verdade.
    */
   sidebarWidth: number;
+  /**
+   * Em que canto do chat a pilha de transmissões fica ancorada.
+   *
+   * Uma escolha só, e não uma por transmissão: as janelinhas se empilham a
+   * partir do canto, e o arrasto move a pilha inteira. A lista fechada de
+   * cantos vive em electron/settings.ts e é reaplicada lá.
+   */
+  telaCanto: TelaCanto;
+  /**
+   * Largura das janelinhas de transmissão, em px. A altura sai do vídeo.
+   *
+   * Mesma história do sidebarWidth: mora no settings.json porque o userData
+   * sobrevive à atualização, e os limites de verdade estão no main.
+   */
+  telaLargura: number;
   /**
    * Atalhos globais por ação. Ação ausente = sem tecla vinculada.
    *

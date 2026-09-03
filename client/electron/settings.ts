@@ -93,6 +93,25 @@ export interface Settings {
    */
   sidebarWidth: number;
   /**
+   * Em que canto do chat a pilha de transmissoes fica ancorada.
+   *
+   * Uma escolha SO, e nao uma por transmissao: as janelinhas se empilham a
+   * partir do canto, entao guardar canto por pessoa faria duas se cruzarem
+   * na tela sem que ninguem tivesse pedido isso. O arrasto move a pilha
+   * inteira, e por isso o que se salva e o canto dela.
+   */
+  telaCanto: TelaCanto;
+  /**
+   * Largura das janelinhas, em pixels. A altura sai da proporcao do video.
+   *
+   * Mesmo motivo do sidebarWidth de morar aqui e nao no localStorage: o
+   * userData sobrevive a atualizacao do app. Os limites tambem nao sao
+   * enfeite - abaixo de TELA_MIN o nome de quem transmite e o cronometro nao
+   * cabem na etiqueta, e acima de TELA_MAX a janelinha deixa de ser um canto
+   * e vira o palco de novo, que e justamente o que se estava tirando.
+   */
+  telaLargura: number;
+  /**
    * Atalhos globais por acao. Ausente = aquela acao nao tem tecla.
    *
    * Mapa, e nao dois campos soltos por acao como o pttKeycode/pttKeyLabel:
@@ -106,6 +125,21 @@ export interface Settings {
 /** Ver o comentario do sidebarWidth. Repetidos no CSS como var(--sidebar-w). */
 export const LARGURA_MIN = 180;
 export const LARGURA_MAX = 480;
+
+/**
+ * Os quatro cantos, em lista FECHADA.
+ *
+ * Mesma decisao dos emoji de reacao na 0.31 e das ACOES_DE_ATALHO: o valor
+ * chega por IPC, e aceitar string qualquer poria lixo no settings.json - que
+ * do outro lado vira nome de classe CSS e simplesmente nao casaria com regra
+ * nenhuma, deixando a janelinha no canto de cima a esquerda sem explicacao.
+ */
+export const TELA_CANTOS = ['cima-esq', 'cima-dir', 'baixo-esq', 'baixo-dir'] as const;
+export type TelaCanto = (typeof TELA_CANTOS)[number];
+
+/** Ver o comentario do telaLargura. Repetidos no Stage.tsx, que segura o arrasto. */
+export const TELA_MIN = 240;
+export const TELA_MAX = 720;
 
 /**
  * As acoes que aceitam atalho global, em lista FECHADA.
@@ -159,6 +193,11 @@ const DEFAULTS: Settings = {
   themeBar: '#1b263b',
   themeSymbol: '#e0e1dd',
   sidebarWidth: 240,
+  // Embaixo a direita, que e onde o preview do proprio compartilhamento ja
+  // morava quando o palco existia - quem atualiza encontra a janelinha no
+  // lugar em que aprendeu a procurar.
+  telaCanto: 'baixo-dir',
+  telaLargura: 360,
   atalhos: {},
 };
 
@@ -209,6 +248,20 @@ function largura(v: unknown, padrao: number): number {
   return Math.min(LARGURA_MAX, Math.max(LARGURA_MIN, Math.round(n)));
 }
 
+/** Um canto conhecido, ou o padrao. Usado na leitura e no patch. */
+function canto(v: unknown, padrao: TelaCanto): TelaCanto {
+  return typeof v === 'string' && (TELA_CANTOS as readonly string[]).includes(v)
+    ? (v as TelaCanto)
+    : padrao;
+}
+
+/** Uma largura de janelinha dentro dos limites. Usada na leitura e no patch. */
+function larguraTela(v: unknown, padrao: number): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return padrao;
+  return Math.min(TELA_MAX, Math.max(TELA_MIN, Math.round(n)));
+}
+
 /** Um #rrggbb valido, ou o padrao. Usado na leitura; o patch tem o seu. */
 function cor(v: unknown, padrao: string): string {
   return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v.trim())
@@ -249,6 +302,11 @@ export function getSettings(): Settings {
       // Pelo mesmo motivo das cores: vai virar grid-template-columns, e um
       // valor invalido ali colapsa a barra lateral inteira.
       sidebarWidth: largura(raw.sidebarWidth, DEFAULTS.sidebarWidth),
+      // O canto vira NOME DE CLASSE no CSS: um valor desconhecido nao pinta
+      // errado, nao casa com regra nenhuma - e a janelinha fica sem ancora,
+      // no canto de cima a esquerda, sem nada explicando por que.
+      telaCanto: canto(raw.telaCanto, DEFAULTS.telaCanto),
+      telaLargura: larguraTela(raw.telaLargura, DEFAULTS.telaLargura),
       // Mapa, entao pelo mesmo motivo do volumes/screenVolumes acima: o
       // spread copiaria a referencia do JSON lido, e um settings.json de
       // antes da 0.36 deixaria o campo undefined em vez do objeto vazio.
@@ -273,7 +331,8 @@ const ALLOWED_KEYS = new Set<keyof Settings>([
   'echoCancellation', 'autoGainControl', 'rnnoise', 'volumes', 'screenVolumes',
   'voiceVolume', 'effectsVolume', 'chatVolume',
   'screenAudioDeviceId', 'isolarAudioNaTela', 'theme',
-  'themeBg', 'themeBar', 'themeSymbol', 'sidebarWidth', 'atalhos',
+  'themeBg', 'themeBar', 'themeSymbol', 'sidebarWidth',
+  'telaCanto', 'telaLargura', 'atalhos',
 ]);
 
 /**
@@ -321,6 +380,19 @@ export function sanitizePatch(input: unknown): Partial<Settings> {
     if (k === 'sidebarWidth') {
       if (!Number.isFinite(Number(v))) continue;
       out[k] = largura(v, DEFAULTS.sidebarWidth);
+      continue;
+    }
+    // Canto desconhecido e DESCARTADO, e nao corrigido pro padrao: o patch e
+    // parcial, e deixar de fora preserva o canto que a pessoa ja tinha
+    // escolhido em vez de joga-la de volta pro de fabrica.
+    if (k === 'telaCanto') {
+      if (typeof v !== 'string' || !(TELA_CANTOS as readonly string[]).includes(v)) continue;
+      out[k] = v;
+      continue;
+    }
+    if (k === 'telaLargura') {
+      if (!Number.isFinite(Number(v))) continue;
+      out[k] = larguraTela(v, DEFAULTS.telaLargura);
       continue;
     }
     // O patch de atalhos e SUBSTITUICAO do mapa inteiro, nao merge por acao:
