@@ -57,9 +57,6 @@ export interface Settings {
    * maquina.
    */
   isolarAudioNaTela: boolean;
-  overlayEnabled: boolean;
-  overlayX: number | null;
-  overlayY: number | null;
   /** Id de um dos temas em src/lib/themes.ts. Preferencia da maquina. */
   theme: string;
   /**
@@ -117,9 +114,9 @@ export const LARGURA_MAX = 480;
  * qualquer string faria o settings.json virar deposito de qualquer coisa.
  * Acao que nao estiver aqui e descartada no patch.
  *
- * Escolhidas com ele em 02/09/2026. Ficaram de fora "sair do canal" (sair da
+ * Escolhidas com ele em 02/09/2026. Ficou de fora "sair do canal" - sair da
  * call sem querer por causa de uma tecla mal escolhida e pior que o atalho
- * economiza) e o overlay, que ja tem botao proprio.
+ * economiza.
  */
 export const ACOES_DE_ATALHO = ['mudo', 'surdo'] as const;
 export type AcaoDeAtalho = (typeof ACOES_DE_ATALHO)[number];
@@ -156,9 +153,6 @@ const DEFAULTS: Settings = {
   chatVolume: 100,
   screenAudioDeviceId: null,
   isolarAudioNaTela: true,
-  overlayEnabled: true,
-  overlayX: null,
-  overlayY: null,
   theme: 'abissal',
   // Os do Abissal, que e o tema padrao. Valem so ate a primeira troca.
   themeBg: '#0d1b2a',
@@ -278,8 +272,7 @@ const ALLOWED_KEYS = new Set<keyof Settings>([
   'speakerDeviceId', 'micSensitivity', 'noiseSuppression',
   'echoCancellation', 'autoGainControl', 'rnnoise', 'volumes', 'screenVolumes',
   'voiceVolume', 'effectsVolume', 'chatVolume',
-  'screenAudioDeviceId', 'isolarAudioNaTela',
-  'overlayEnabled', 'overlayX', 'overlayY', 'theme',
+  'screenAudioDeviceId', 'isolarAudioNaTela', 'theme',
   'themeBg', 'themeBar', 'themeSymbol', 'sidebarWidth', 'atalhos',
 ]);
 

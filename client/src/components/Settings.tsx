@@ -639,21 +639,6 @@ export function Settings({ settings, onPatch, micLevel, onClose }: Props) {
             </section>
           )}
 
-          <section className="settings__group">
-            <h3 className="settings__title">Overlay</h3>
-            <label className="settings__row">
-              <span className="settings__label">Mostrar durante o jogo</span>
-              <input
-                type="checkbox"
-                className="settings__check"
-                checked={settings.overlayEnabled}
-                onChange={(e) => void onPatch({ overlayEnabled: e.target.checked })}
-              />
-            </label>
-            <p className="settings__hint">
-              Aparece só quando você está numa sala. Ctrl+Shift+O liga e desliga.
-            </p>
-          </section>
         </div>
 
         <div className="modal__foot">

@@ -44,7 +44,7 @@ const forcarCjs = {
   // estas linhas e transforma o pior tipo de falha (silenciosa, em
   // producao) num build vermelho.
   closeBundle() {
-    for (const arq of ['preload.cjs', 'overlay-preload.cjs']) {
+    for (const arq of ['preload.cjs']) {
       const caminho = resolve(__dirname, 'dist-electron', arq);
       if (!existsSync(caminho)) continue;
       const código = readFileSync(caminho, 'utf8');
@@ -118,7 +118,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: resolve(__dirname, 'index.html'),
-        overlay: resolve(__dirname, 'overlay.html'),
       },
     },
   },
@@ -153,7 +152,6 @@ export default defineConfig({
         },
       },
       { entry: 'electron/preload.ts', vite: preloadOut },
-      { entry: 'electron/overlay-preload.ts', vite: preloadOut },
     ]),
     renderer(),
   ],

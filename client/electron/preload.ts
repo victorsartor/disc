@@ -144,16 +144,6 @@ const api = {
       ipcRenderer.invoke('settings:key-in-use', keycode, exceto),
   },
 
-  overlay: {
-    toggle: (): Promise<boolean> => ipcRenderer.invoke('overlay:toggle'),
-    push: (state: unknown) => ipcRenderer.send('overlay:state', state),
-    onEnabled: (cb: (enabled: boolean) => void) => {
-      const h = (_e: unknown, v: boolean) => cb(v);
-      ipcRenderer.on('overlay:enabled', h);
-      return () => ipcRenderer.off('overlay:enabled', h);
-    },
-  },
-
   /** Hold-to-talk: true no keydown, false no keyup. */
   onPushToTalk: (cb: (down: boolean) => void) => {
     const h = (_e: unknown, down: boolean) => cb(down);

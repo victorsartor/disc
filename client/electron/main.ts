@@ -22,10 +22,6 @@ import {
   teclaEmUso,
 } from './ptt.js';
 import {
-  showOverlay, hideOverlay, destroyOverlay, toggleOverlay,
-  pushState, setInteractive,
-} from './overlay.js';
-import {
   init as initUpdater, currentState as updateState, skip as skipUpdate,
 } from './updater.js';
 import {
@@ -239,7 +235,6 @@ function createWindow(): void {
 
   win.on('closed', () => {
     win = null;
-    destroyOverlay();
   });
 }
 
@@ -318,11 +313,6 @@ if (!app.requestSingleInstanceLock()) {
       (acao) => win?.webContents.send('atalho:acionado', acao),
     );
     syncPtt();
-
-    globalShortcut.register('Control+Shift+O', () => {
-      const enabled = toggleOverlay();
-      win?.webContents.send('overlay:enabled', enabled);
-    });
 
     // Sobra de audio de uma sessao que morreu no meio (queda, kill, falta de
     // energia). Sem isto a pessoa reabre o app e nao tem som nenhum, porque
@@ -710,25 +700,6 @@ ipcMain.handle('settings:set-volume', (_e, identity: string, volume: number) => 
 
 ipcMain.handle('settings:set-screen-volume', (_e, identity: string, volume: number) => {
   setScreenVolume(identity, volume);
-});
-
-// --- IPC: overlay --------------------------------------------------------
-ipcMain.handle('overlay:toggle', () => {
-  const enabled = toggleOverlay();
-  return enabled;
-});
-
-ipcMain.on('overlay:state', (_e, payload: unknown) => {
-  const s = getSettings();
-  const connected = Boolean((payload as { channelName?: string | null })?.channelName);
-  // Overlay so faz sentido em call. Fora dela, some sozinho.
-  if (s.overlayEnabled && connected) showOverlay();
-  else hideOverlay();
-  pushState(payload);
-});
-
-ipcMain.on('overlay:interactive', (_e, interactive: boolean) => {
-  setInteractive(interactive);
 });
 
 // --- IPC: notificacao de mencao ------------------------------------------

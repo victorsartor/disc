@@ -302,9 +302,6 @@ export interface Settings {
    * assiste para de se ouvir de volta.
    */
   isolarAudioNaTela: boolean;
-  overlayEnabled: boolean;
-  overlayX: number | null;
-  overlayY: number | null;
   /** Um dos ids de lib/themes.ts. Vale pra maquina, nao pra conta. */
   theme: string;
   /**
@@ -518,11 +515,6 @@ export interface DiscApi {
      * checagem, senão trocar a tecla dela por ela mesma acusaria conflito.
      */
     keyInUse(keycode: number, exceto?: AcaoDeAtalho): Promise<AcaoDeAtalho | 'ptt' | null>;
-  };
-  overlay: {
-    toggle(): Promise<boolean>;
-    push(state: unknown): void;
-    onEnabled(cb: (enabled: boolean) => void): () => void;
   };
   onPushToTalk(cb: (down: boolean) => void): () => void;
   /**

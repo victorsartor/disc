@@ -487,23 +487,8 @@ export function App() {
     [users],
   );
 
-  // Espelha o estado da sala no overlay
+  // Nome do canal ativo — o topbar e o ObsSetup usam.
   const activeName = me?.channels.find((c) => c.id === room.channelId)?.name ?? null;
-  useEffect(() => {
-    window.disc.overlay.push({
-      channelName: room.channelId ? activeName : null,
-      peers: room.peers.map((p) => ({
-        identity: p.identity,
-        name: p.name,
-        avatarUrl: p.avatarUrl,
-        isSpeaking: p.isSpeaking,
-        isMuted: p.isMuted,
-        isSharing: p.isSharing,
-      })),
-      micOn: room.micOn,
-      pttActive: room.pttDown,
-    });
-  }, [room.channelId, activeName, room.peers, room.micOn, room.pttDown]);
 
   // No Linux o seletor e do sistema (ver initDisplayMedia no main): abrir o
   // nosso modal por cima so poria uma escolha em cima da outra — e a escolha
