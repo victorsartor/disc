@@ -34,7 +34,7 @@ services:
     depends_on: [server, livekit]
 
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.9.12
     restart: unless-stopped
     logging: *log
     # --node-ip e o que faz o LiveKit anunciar o endereco da tailnet

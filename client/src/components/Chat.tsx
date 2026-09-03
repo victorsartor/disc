@@ -757,6 +757,21 @@ export function Chat({
                 conferirMencao(el.value, el.selectionStart);
               }}
               onBlur={() => setMencionando(null)}
+              onPaste={(e) => {
+                // Print colado com Ctrl+V sobe pelo MESMO caminho do botão
+                // do clipe (a `escolher` abaixo). Só intercepta quando o
+                // clipboard tem imagem — colar texto segue pro textarea
+                // normalmente, sem passar por aqui.
+                if (subindo || pendente) return;
+                const item = Array.from(e.clipboardData.items).find((it) =>
+                  it.type.startsWith('image/'),
+                );
+                if (!item) return;
+                const file = item.getAsFile();
+                if (!file) return;
+                e.preventDefault();
+                void escolher(file);
+              }}
               onKeyDown={(e) => {
                 // Com o menu aberto, o teclado é DELE. Enter aqui escolhe a
                 // pessoa em vez de mandar a mensagem — mandar no meio de uma
