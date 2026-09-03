@@ -53,9 +53,14 @@ function loadBitmap(file: File): Promise<HTMLImageElement> {
  *
  * Bem maior que o das outras porque esta é a única que sobe do jeito que
  * saiu do disco: o canvas não pode encolher um GIF sem matar a animação
- * junto, então não há como reduzir antes. O servidor barra no mesmo número.
+ * junto, então não há como reduzir antes.
+ *
+ * O servidor barra no mesmo número (MAX_ANIMATED_BYTES em
+ * server/src/profile.ts) — os dois têm que andar juntos, e lá ainda existe
+ * um terceiro teto, sobre o corpo já em base64. Subir só este daqui deixa a
+ * pessoa escolher um arquivo que o servidor vai recusar.
  */
-export const MAX_ANIMADA_BYTES = 8 * 1024 * 1024;
+export const MAX_ANIMADA_BYTES = 10 * 1024 * 1024;
 
 /**
  * A imagem carrega animação?

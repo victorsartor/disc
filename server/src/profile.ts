@@ -40,11 +40,14 @@ const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
  * client/src/lib/image.ts — os dois números têm que andar juntos.
  *
  * Estes bytes viram BLOB no SQLite (ver o comentário da tabela images), e o
- * better-sqlite3 é síncrono: 8 MB ainda é rápido o bastante pra não travar
+ * better-sqlite3 é síncrono: 10 MB ainda é rápido o bastante pra não travar
  * o event loop de forma perceptível. Um teto muito acima disso seria o
  * sinal de que as imagens deveriam ir pro filesDir, como os anexos foram.
+ *
+ * Era 8 MB até 03/09/2026; subiu a pedido dele. Quem mexer neste número mexe
+ * TAMBÉM no MAX_BODY_BYTES logo abaixo — ver o comentário de lá.
  */
-const MAX_ANIMATED_BYTES = 8 * 1024 * 1024;
+const MAX_ANIMATED_BYTES = 10 * 1024 * 1024;
 
 // Só formatos que todo navegador desenha. Nada de SVG: SVG é documento, e
 // documento com <script> dentro servido do nosso domínio é XSS de graça.
@@ -54,16 +57,25 @@ const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gi
  * Os que podem chegar animados, e por isso ganham o teto maior.
  *
  * Não checamos se o arquivo REALMENTE está animado — um PNG disfarçado de
- * GIF só compraria 5 MB a mais de espaço, e o custo de decodificar todo
+ * GIF só compraria 7 MB a mais de espaço, e o custo de decodificar todo
  * upload pra confirmar não paga isso.
  */
 const ANIMATED_MIME = new Set(['image/gif', 'image/webp']);
 
 const DATA_URL = /^data:([a-z]+\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/;
 
-/** Base64 gordo o bastante pra virar os 8 MB de um animado depois de
- *  decodificado — o base64 infla um terço, e ainda sobra pro JSON em volta. */
-const MAX_BODY_BYTES = 12 * 1024 * 1024;
+/**
+ * Base64 gordo o bastante pra virar os 10 MB de um animado depois de
+ * decodificado — o base64 infla um terço, e ainda sobra pro JSON em volta.
+ *
+ * ANDA JUNTO com o MAX_ANIMATED_BYTES. Este é o portão de FORA, contado
+ * sobre o corpo ainda codificado, e é por isso que ele é o maior dos dois:
+ * 10 MB de arquivo chegam aqui como ~13,4 MB de base64. Deixar este número
+ * pra trás não dá "arquivo grande demais" com a mensagem em português —
+ * dá o 413 seco do Fastify, antes de o teto de verdade sequer ser
+ * consultado, e o erro na tela não diz qual é o limite.
+ */
+const MAX_BODY_BYTES = 15 * 1024 * 1024;
 
 /**
  * A identidade do LiveKit é o id do usuário — exceto a do ingress do OBS,
