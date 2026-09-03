@@ -2,6 +2,16 @@
    Paleta e sistema visual do DESIGN.md ("Serene Power"): tema escuro em
    azuis, profundidade por CAMADA TONAL e desfoque em vez de sombra, e
    contorno de 1px no lugar de borda dura.
+
+   ESPAÇAMENTO: grid de 8px, com meio-passo de 4px pra UI densa — todo
+   padding, margin e gap deste arquivo é múltiplo de 4. Duas exceções, as
+   duas de propósito:
+
+   1. Padding VERTICAL de 1–2px em pílula (.channel__count, .member__tag,
+      .msg__codigo, .reacao, .keybind__key). A altura dessas caixas é ditada
+      pela tipografia, não pelo grid: subir pra 4px engorda o chip e
+      desalinha a linha em que ele mora. O horizontal delas está no grid.
+   2. Fundo #000 em superfície de MÍDIA — está comentado onde aparece.
    ──────────────────────────────────────────────────────────────────────── */
 :root {
   /* As 5 cores da paleta */
@@ -238,7 +248,7 @@ textarea {
   letter-spacing: -0.01em;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .sidebar__logo {
@@ -257,7 +267,7 @@ textarea {
 }
 
 .sidebar__label {
-  padding: 0 8px 10px;
+  padding: 0 8px 8px;
 }
 
 /* ── Canal de voz ────────────────────────────────────────────────────── */
@@ -275,8 +285,8 @@ textarea {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 10px;
+  gap: 12px;
+  padding: 8px 12px;
   border-radius: var(--radius);
   color: var(--lavender);
   text-align: left;
@@ -311,17 +321,17 @@ textarea {
   font-variant-numeric: tabular-nums;
   min-width: 20px;
   text-align: center;
-  padding: 1px 6px;
+  padding: 1px 8px;
   border-radius: 999px;
   background: var(--glass);
   color: var(--alabaster);
 }
 
 .channel__members {
-  padding: 2px 6px 2px 14px;
+  padding: 4px 8px 4px 16px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 /* ── Canal: editar (só admin) ───────────────────────────────────────── */
@@ -364,9 +374,9 @@ textarea {
 
 .channel__acoes {
   position: absolute;
-  right: 6px;
+  right: 8px;
   display: flex;
-  gap: 2px;
+  gap: 4px;
   opacity: 0;
   transition: opacity 0.13s;
 }
@@ -394,11 +404,11 @@ textarea {
 
 .channel__confirma {
   position: absolute;
-  right: 6px;
+  right: 8px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 6px;
+  gap: 8px;
+  padding: 4px 8px;
   border-radius: var(--radius-sm);
   background: var(--level-3);
   font-size: 11.5px;
@@ -420,12 +430,12 @@ textarea {
 }
 
 .channel__nome-form {
-  padding: 2px 4px 6px;
+  padding: 4px 4px 8px;
 }
 
 .channel__nome-input {
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border-radius: var(--radius);
   background: var(--level-0);
   border: 1px solid var(--line-strong);
@@ -496,7 +506,7 @@ textarea {
 
 .member__tag {
   font-size: 10px;
-  padding: 1px 6px;
+  padding: 1px 8px;
   border-radius: var(--radius-sm);
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -517,7 +527,7 @@ textarea {
 /* ── Barra do usuário ────────────────────────────────────────────────── */
 .userbar {
   border-top: 1px solid var(--line);
-  padding: 10px 12px 12px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -527,7 +537,7 @@ textarea {
 .userbar__id {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -621,7 +631,7 @@ textarea {
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   /* Folga à direita pros botões de janela, que o Windows desenha por cima do
      conteúdo (ver titleBarOverlay no main.ts). Sem ela o "Compartilhar tela"
      ficaria embaixo do X. */
@@ -671,6 +681,10 @@ textarea {
    `object-fit: contain` do vídeo garante a tela inteira dentro dele. */
 .quadro {
   position: relative;
+  /* Preto puro, e não --level-0: isto é a tarja do letterbox que sobra em
+     volta do `object-fit: contain`. Um fundo azulado ali vira moldura
+     colorida em torno de toda tela compartilhada. Fora da paleta de
+     propósito — é superfície de mídia, não de interface. */
   background: #000;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -687,18 +701,18 @@ textarea {
 
 .quadro__label {
   position: absolute;
-  left: 10px;
-  bottom: 10px;
+  left: 12px;
+  bottom: 12px;
   background: var(--glass);
   backdrop-filter: blur(12px);
   border: 1px solid var(--line);
-  padding: 4px 10px;
+  padding: 4px 12px;
   border-radius: var(--radius);
   font-size: 12px;
   font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* ── Cronômetro da live ──────────────────────────────────────────────────
@@ -710,7 +724,7 @@ textarea {
    variável a caixa inteira treme junto, e a tremida aparece mais que o
    número. */
 .quadro__tempo {
-  padding-left: 6px;
+  padding-left: 8px;
   border-left: 1px solid var(--line-strong);
   color: var(--lavender);
   font-variant-numeric: tabular-nums;
@@ -728,7 +742,7 @@ textarea {
 .volpop {
   position: fixed;
   z-index: 40;
-  padding: 10px 12px;
+  padding: 12px;
   background: var(--level-3);
   background-image: linear-gradient(var(--glass), var(--glass));
   backdrop-filter: blur(12px);
@@ -756,7 +770,7 @@ textarea {
 .volpop__linha {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 @keyframes volpop-entra {
@@ -841,7 +855,7 @@ textarea {
 .msg {
   display: flex;
   gap: 12px;
-  padding: 5px 10px;
+  padding: 4px 12px;
   border-radius: var(--radius);
   transition: background 0.1s;
   /* Âncora da barra de ações, que flutua no canto de cima à direita. */
@@ -857,8 +871,8 @@ textarea {
    esquerda pro horário, que aparece quando o mouse passa. Sem isso o mesmo
    rosto se repetia linha após linha. */
 .msg--seguida {
-  padding-top: 1px;
-  padding-bottom: 1px;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 /* Mesma largura da foto, pra o texto não sair do prumo. */
@@ -929,7 +943,7 @@ textarea {
 .msg__codigo {
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
   font-size: 0.88em;
-  padding: 1px 5px;
+  padding: 1px 4px;
   border-radius: 5px;
   background: var(--level-0);
   border: 1px solid var(--line);
@@ -937,7 +951,7 @@ textarea {
 }
 
 .msg__bloco-wrap {
-  margin: 5px 0;
+  margin: 4px 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--level-0);
@@ -951,7 +965,7 @@ textarea {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  padding: 3px 6px 3px 10px;
+  padding: 4px 8px 4px 12px;
   border-bottom: 1px solid var(--line);
   min-height: 26px;
 }
@@ -970,7 +984,7 @@ textarea {
   place-items: center;
   min-width: 26px;
   height: 22px;
-  padding: 0 7px;
+  padding: 0 8px;
   border-radius: 5px;
   color: var(--lavender);
   font-size: 11px;
@@ -988,7 +1002,7 @@ textarea {
    a janela passa a rolar de lado. */
 .msg__bloco {
   margin: 0;
-  padding: 9px 11px;
+  padding: 8px 12px;
   overflow-x: auto;
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
   font-size: 12.5px;
@@ -1001,7 +1015,7 @@ textarea {
 /* ── Menções ──────────────────────────────────────────────────────────── */
 .mencao {
   display: inline;
-  padding: 0 3px;
+  padding: 0 4px;
   border-radius: 4px;
   font-weight: 600;
   color: var(--alabaster);
@@ -1063,7 +1077,7 @@ textarea {
   align-items: baseline;
   gap: 8px;
   width: 100%;
-  padding: 6px 9px;
+  padding: 8px;
   border-radius: 6px;
   text-align: left;
   font-size: 13.5px;
@@ -1102,8 +1116,8 @@ textarea {
   right: 12px;
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 3px;
+  gap: 4px;
+  padding: 4px;
   background: var(--level-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1146,7 +1160,7 @@ textarea {
    fecha tudo de uma vez (ver o onMouseLeave no Chat.tsx). */
 .msg__emojis {
   display: flex;
-  gap: 1px;
+  gap: 4px;
 }
 
 .msg__emoji {
@@ -1174,8 +1188,8 @@ textarea {
 .reacao {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 2px 7px;
+  gap: 4px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: var(--level-0);
   border: 1px solid var(--line);
@@ -1217,9 +1231,9 @@ textarea {
 .msg__citacao {
   display: flex;
   align-items: baseline;
-  gap: 7px;
+  gap: 8px;
   max-width: 100%;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   padding-left: 8px;
   border-left: 2px solid var(--dusk);
   font-size: 12.5px;
@@ -1263,7 +1277,7 @@ textarea {
 
 /* ── Editado e apagado ────────────────────────────────────────────────── */
 .msg__editado {
-  margin-left: 6px;
+  margin-left: 8px;
   font-size: 10.5px;
   color: var(--lavender);
   user-select: none;
@@ -1320,7 +1334,7 @@ textarea {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
-  padding: 7px 10px;
+  padding: 8px 12px;
   background: var(--level-0);
   border: 1px solid var(--line);
   border-left: 2px solid var(--dusk);
@@ -1353,7 +1367,7 @@ textarea {
   background: var(--level-0);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  padding: 12px 14px;
+  padding: 12px 16px;
   font-size: 15px;
   line-height: 1.45;
   resize: none;
@@ -1412,7 +1426,7 @@ textarea {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   background: var(--level-0);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1451,7 +1465,7 @@ textarea {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .chat__progresso {
@@ -1475,7 +1489,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 10px 0 6px;
+  margin: 12px 0 8px;
   color: var(--danger);
   font-size: 11px;
   font-weight: 600;
@@ -1494,7 +1508,7 @@ textarea {
 
 .chat__erro {
   margin-bottom: 8px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border-radius: var(--radius);
   background: rgba(229, 72, 77, 0.12);
   color: var(--danger);
@@ -1502,7 +1516,7 @@ textarea {
 }
 
 .anexo {
-  margin-top: 6px;
+  margin-top: 8px;
   max-width: 400px;
 }
 
@@ -1556,15 +1570,15 @@ textarea {
   max-height: 320px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
-  background: #000;
+  background: #000; /* letterbox — ver .quadro */
 }
 
 .anexo--arquivo {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 12px;
   background: var(--level-0);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1594,7 +1608,7 @@ textarea {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .anexo__nome {
@@ -1635,16 +1649,16 @@ textarea {
 .enquete__opcoes {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .enquete__opcao {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 12px;
   background: var(--level-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1686,7 +1700,7 @@ textarea {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 
 .enquete__texto {
@@ -1738,8 +1752,8 @@ textarea {
 .nova-enquete {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
+  gap: 8px;
+  padding: 12px;
   background: var(--level-0);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1778,7 +1792,7 @@ textarea {
 .nova-enquete__pergunta,
 .nova-enquete__campo {
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 12px;
   background: var(--level-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1806,12 +1820,12 @@ textarea {
 .nova-enquete__acoes {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 2px;
+  gap: 12px;
+  margin-top: 4px;
 }
 
 .nova-enquete__mais {
-  padding: 5px 9px;
+  padding: 4px 8px;
   font-size: 12px;
   color: var(--lavender);
   border: 1px solid var(--line);
@@ -1828,7 +1842,7 @@ textarea {
 .nova-enquete__multi {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 12px;
   color: var(--lavender);
   cursor: pointer;
@@ -1842,7 +1856,7 @@ textarea {
 /* Empurra o botão de criar pra direita, longe do de cancelar do topo. */
 .nova-enquete__criar {
   margin-left: auto;
-  padding: 6px 14px;
+  padding: 8px 16px;
   font-size: 13px;
   font-weight: 600;
   color: var(--ink);
@@ -1882,7 +1896,7 @@ textarea {
    ocupam espaço na frente da foto. */
 .lightbox__x {
   position: absolute;
-  top: 14px;
+  top: 16px;
   right: 16px;
   display: grid;
   place-items: center;
@@ -1917,7 +1931,7 @@ textarea {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 7px 12px;
+  padding: 8px 12px;
   border-radius: var(--radius);
   color: var(--alabaster);
   font-size: 13px;
@@ -1941,7 +1955,7 @@ textarea {
 
 /* ── Botões ──────────────────────────────────────────────────────────── */
 .btn {
-  padding: 8px 14px;
+  padding: 8px 16px;
   border-radius: var(--radius);
   font-size: 13px;
   font-weight: 600;
@@ -1967,7 +1981,7 @@ textarea {
 
 .btn--danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--alabaster);
 }
 
 .btn--ghost {
@@ -1984,7 +1998,7 @@ textarea {
 }
 
 .btn--sm {
-  padding: 5px 11px;
+  padding: 4px 12px;
   font-size: 12px;
   flex-shrink: 0;
 }
@@ -2022,7 +2036,7 @@ textarea {
   display: block;
   width: 88px;
   height: 88px;
-  margin: 0 auto 18px;
+  margin: 0 auto 16px;
   object-fit: contain;
   filter: drop-shadow(0 0 24px var(--brand-glow));
 }
@@ -2050,7 +2064,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 8px;
   font-family: var(--mono);
   font-size: 12px;
   color: var(--lavender);
@@ -2096,7 +2110,7 @@ textarea {
 }
 
 .updater__percent {
-  margin: 14px 0 0;
+  margin: 16px 0 0;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   font-size: 22px;
@@ -2117,7 +2131,7 @@ textarea {
 }
 
 .updater__escape {
-  margin-top: 22px;
+  margin-top: 24px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2128,7 +2142,7 @@ textarea {
 }
 
 .login__title {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -2141,7 +2155,7 @@ textarea {
 }
 
 .login__note {
-  margin: 18px 0 0;
+  margin: 16px 0 0;
   font-size: 12px;
   color: var(--lavender);
   line-height: 1.55;
@@ -2175,7 +2189,7 @@ textarea {
 }
 
 .modal__head {
-  padding: 18px 22px;
+  padding: 16px 24px;
   border-bottom: 1px solid var(--line);
   font-size: 16px;
   font-weight: 600;
@@ -2183,19 +2197,19 @@ textarea {
 }
 
 .modal__grid {
-  padding: 18px 22px;
+  padding: 16px 24px;
   overflow-y: auto;
   display: grid;
-  gap: 14px;
+  gap: 16px;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
 }
 
 .modal__foot {
-  padding: 14px 22px;
+  padding: 16px 24px;
   border-top: 1px solid var(--line);
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 12px;
 }
 
 /* Encostada a esquerda, discreta: serve pra conferir qual build esta
@@ -2229,7 +2243,7 @@ textarea {
   aspect-ratio: 16 / 9;
   object-fit: cover;
   display: block;
-  background: #000;
+  background: #000; /* letterbox — ver .quadro */
 }
 
 /* Sem miniatura (Wayland entrega a lista, mas nao o frame) o cartao ainda
@@ -2245,7 +2259,7 @@ textarea {
 }
 
 .source__name {
-  padding: 8px 10px;
+  padding: 8px 12px;
   font-size: 12px;
   color: var(--lavender);
   overflow: hidden;
@@ -2262,17 +2276,17 @@ textarea {
 
 /* ── Configurações ───────────────────────────────────────────────────── */
 .settings {
-  padding: 20px 22px;
+  padding: 24px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 26px;
+  gap: 24px;
 }
 
 .settings__group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .settings__row {
@@ -2352,7 +2366,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--level-0);
@@ -2399,7 +2413,7 @@ textarea {
   padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
   /* Camada 2 do DESIGN.md: vidro sobre desfoque, contorno no lugar de sombra.
      O fundo sólido embaixo garante leitura mesmo sem suporte a blur. */
   background: var(--level-3);
@@ -2414,7 +2428,7 @@ textarea {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border-radius: var(--radius-sm);
   font-size: 13px;
   color: var(--alabaster);
@@ -2461,8 +2475,8 @@ textarea {
 }
 
 .volume {
-  margin: 4px 0 6px;
-  padding: 10px 12px;
+  margin: 4px 0 8px;
+  padding: 12px;
   background: var(--level-3);
   background-image: linear-gradient(var(--glass), var(--glass));
   backdrop-filter: blur(12px);
@@ -2511,8 +2525,8 @@ textarea {
 .field {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 5px 0;
+  gap: 12px;
+  padding: 4px 0;
 }
 
 .field__label {
@@ -2528,7 +2542,7 @@ textarea {
   background: var(--level-0);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  padding: 6px 10px;
+  padding: 8px 12px;
   font-size: 13px;
   color: var(--alabaster);
   overflow: hidden;
@@ -2548,7 +2562,7 @@ textarea {
 .keybind__grupo {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .keybind__grupo .keybind {
@@ -2578,10 +2592,10 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 8px;
   min-width: 200px;
   min-height: 38px;
-  padding: 7px 14px;
+  padding: 8px 16px;
   border-radius: var(--radius);
   border: 1.5px solid var(--line-strong);
   background: var(--level-0);
@@ -2641,7 +2655,7 @@ textarea {
   border: 1px solid var(--line-strong);
   border-bottom-width: 2px;
   border-radius: var(--radius-sm);
-  padding: 2px 9px;
+  padding: 2px 8px;
 }
 
 .keybind__hint {
@@ -2731,9 +2745,9 @@ textarea {
 .statuspick__item {
   display: flex;
   align-items: flex-start;
-  gap: 9px;
+  gap: 8px;
   width: 100%;
-  padding: 8px 9px;
+  padding: 8px;
   border-radius: var(--radius);
   text-align: left;
   transition: background 0.12s;
@@ -2754,7 +2768,7 @@ textarea {
 .statuspick__texto {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
   min-width: 0;
 }
 
@@ -2776,8 +2790,8 @@ textarea {
 .ping {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 8px;
+  padding: 4px 12px;
   border-radius: 999px;
   background: var(--glass);
   border: 1px solid var(--line);
@@ -2825,7 +2839,7 @@ textarea {
   border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid var(--line-strong);
-  background: #000;
+  background: #000; /* letterbox — ver .quadro */
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   pointer-events: none;
 }
@@ -2844,13 +2858,13 @@ textarea {
   background: var(--level-2);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* O mesmo cronômetro do quadro, na escala do preview. */
 .preview__label .quadro__tempo {
   margin-left: auto;
-  padding-left: 6px;
+  padding-left: 8px;
 }
 
 /* ── Quadro de transmissão ───────────────────────────────────────────────
@@ -2875,10 +2889,10 @@ textarea {
 
 .quadro__acoes {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 12px;
+  right: 12px;
   display: flex;
-  gap: 6px;
+  gap: 8px;
   /* Somem enquanto ninguém mexe: são botões por cima de vídeo, e vídeo é pra
      ser olhado. Voltam ao primeiro movimento do mouse. */
   opacity: 0;
@@ -2915,7 +2929,7 @@ textarea {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   background: var(--level-2);
   border: 1px dashed var(--line-strong);
   color: var(--lavender);
@@ -2946,7 +2960,7 @@ textarea {
 .lives {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   /* Sem quebrar linha: a barra tem 52px de altura fixa, e uma segunda linha
      de etiquetas vazaria por baixo dela. Com gente demais no ar, some pela
@@ -2957,9 +2971,9 @@ textarea {
 .lives__item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   max-width: 190px;
-  padding: 4px 10px;
+  padding: 4px 12px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--glass);
