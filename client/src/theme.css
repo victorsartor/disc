@@ -12,6 +12,14 @@
       pela tipografia, não pelo grid: subir pra 4px engorda o chip e
       desalinha a linha em que ele mora. O horizontal delas está no grid.
    2. Fundo #000 em superfície de MÍDIA — está comentado onde aparece.
+
+   CANTOS: todo border-radius de superfície sai de --radius-sm/--radius/-md/
+   -lg/-xl. As exceções estão comentadas onde aparecem, e são todas pela
+   mesma razão: ali o número é METADE DA ESPESSURA — o que fecha a forma em
+   pílula — ou o canto de uma risca de poucos pixels, e não um raio de
+   superfície. Amarrá-los a um token faria uma barra de progresso de 4px
+   mudar de forma junto com botão e modal. `50%` e `999px` também ficam
+   crus: círculo e pílula não têm token, e nem deviam ter.
    ──────────────────────────────────────────────────────────────────────── */
 :root {
   /* As 5 cores da paleta */
@@ -821,7 +829,7 @@ textarea {
   content: '';
   position: absolute;
   inset: 4px;
-  border-radius: 2px;
+  border-radius: 2px; /* risca de 12px: um raio de token a deformaria */
   background: var(--alabaster);
   opacity: 0;
   transition: opacity 0.13s;
@@ -1176,7 +1184,7 @@ textarea {
   font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
   font-size: 0.88em;
   padding: 1px 4px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--level-0);
   border: 1px solid var(--line);
   overflow-wrap: anywhere;
@@ -1217,7 +1225,7 @@ textarea {
   min-width: 26px;
   height: 22px;
   padding: 0 8px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   color: var(--lavender);
   font-size: 11px;
   font-weight: 600;
@@ -1248,7 +1256,7 @@ textarea {
 .mencao {
   display: inline;
   padding: 0 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-weight: 600;
   color: var(--alabaster);
   background: color-mix(in srgb, var(--dusk) 45%, transparent);
@@ -1310,7 +1318,7 @@ textarea {
   gap: 8px;
   width: 100%;
   padding: 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   text-align: left;
   font-size: 13.5px;
   color: var(--alabaster);
@@ -1373,7 +1381,7 @@ textarea {
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--lavender);
   transition: background 0.1s, color 0.1s;
 }
@@ -1398,7 +1406,7 @@ textarea {
 .msg__emoji {
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 16px;
   line-height: 1;
   transition: background 0.1s, transform 0.08s;
@@ -1531,7 +1539,7 @@ textarea {
   height: 28px;
   min-width: 28px;
   padding: 0 8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--lavender);
   font-size: 11.5px;
   font-weight: 600;
@@ -1702,6 +1710,9 @@ textarea {
 
 .chat__progresso {
   height: 4px;
+  /* Metade da altura, e por isso fora do sistema de token: aqui o número não
+     é um raio de canto, é o que fecha a barra em pílula. Amarrar num token
+     de superfície faria a barra mudar de forma junto com botão e modal. */
   border-radius: 2px;
   background: var(--level-1);
   overflow: hidden;
@@ -1710,7 +1721,7 @@ textarea {
 .chat__progresso-barra {
   height: 100%;
   background: var(--accent);
-  border-radius: 2px;
+  border-radius: 2px; /* metade da altura — ver .chat__progresso */
   transition: width 0.15s ease-out;
 }
 
@@ -2582,7 +2593,7 @@ textarea {
   bottom: -2px;
   width: 2px;
   background: var(--alabaster);
-  border-radius: 1px;
+  border-radius: 1px; /* metade da largura — ver .chat__progresso */
 }
 
 /* ── Select próprio (ver Select.tsx) ─────────────────────────────────── */
