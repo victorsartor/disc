@@ -86,6 +86,31 @@ function page(
 <div class="card"><h1>${title}</h1><p>${message}</p>${extra}</div>`;
 }
 
+/**
+ * O Google fica atrás da internet, e a internet cai. Sem isto, um tropeço de
+ * rede vira 500 com JSON cru na cara de quem está entrando — e como o código
+ * do OAuth é de uso único, a pessoa tem que refazer o login inteiro do zero.
+ * Duas tentativas, com um respiro no meio, cobrem o tropeço curto.
+ */
+async function fetchGoogle(
+  url: string,
+  init: RequestInit,
+  log: FastifyRequest['log'],
+): Promise<Response> {
+  let ultimo: unknown;
+  for (let tentativa = 1; tentativa <= 2; tentativa++) {
+    try {
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(8000) });
+    } catch (err) {
+      ultimo = err;
+      const causa = (err as { cause?: { message?: string } })?.cause?.message;
+      log.warn({ url, tentativa, causa }, 'chamada ao Google falhou');
+      if (tentativa === 1) await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  throw ultimo;
+}
+
 export function registerAuthRoutes(app: FastifyInstance): void {
   // Passo 1 — o Electron abre isto no navegador do sistema.
   // (Google bloqueia OAuth dentro de webview embutida, então tem que ser fora.)
@@ -114,70 +139,86 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         .send(page('Login cancelado', 'Nenhum código foi recebido do Google.', 'erro'));
     }
 
-    const tokenRes = await fetch(GOOGLE_TOKEN, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        code,
-        client_id: config.google.clientId,
-        client_secret: config.google.clientSecret,
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
-      }),
-    });
+    try {
+      const tokenRes = await fetchGoogle(GOOGLE_TOKEN, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: config.google.clientId,
+          client_secret: config.google.clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+        }),
+      }, req.log);
 
-    if (!tokenRes.ok) {
-      req.log.error({ status: tokenRes.status }, 'falha ao trocar code por token');
-      return reply.type('text/html').code(502)
-        .send(page('Erro no login', 'Não foi possível confirmar com o Google.', 'erro'));
-    }
+      if (!tokenRes.ok) {
+        req.log.error({ status: tokenRes.status }, 'falha ao trocar code por token');
+        return reply.type('text/html').code(502)
+          .send(page('Erro no login', 'Não foi possível confirmar com o Google.', 'erro'));
+      }
 
-    const { access_token } = (await tokenRes.json()) as { access_token: string };
+      const { access_token } = (await tokenRes.json()) as { access_token: string };
 
-    const infoRes = await fetch(GOOGLE_USERINFO, {
-      headers: { authorization: `Bearer ${access_token}` },
-    });
-    if (!infoRes.ok) {
-      return reply.type('text/html').code(502)
-        .send(page('Erro no login', 'Não foi possível ler seu perfil do Google.', 'erro'));
-    }
+      const infoRes = await fetchGoogle(GOOGLE_USERINFO, {
+        headers: { authorization: `Bearer ${access_token}` },
+      }, req.log);
+      if (!infoRes.ok) {
+        return reply.type('text/html').code(502)
+          .send(page('Erro no login', 'Não foi possível ler seu perfil do Google.', 'erro'));
+      }
 
-    const profile = (await infoRes.json()) as {
-      sub: string;
-      email?: string;
-      email_verified?: boolean;
-      name?: string;
-      picture?: string;
-    };
+      const profile = (await infoRes.json()) as {
+        sub: string;
+        email?: string;
+        email_verified?: boolean;
+        name?: string;
+        picture?: string;
+      };
 
-    const email = profile.email?.toLowerCase();
+      const email = profile.email?.toLowerCase();
 
-    // Allowlist — é aqui que o controle de acesso acontece de verdade.
-    if (!email || !profile.email_verified || !config.allowlist.includes(email)) {
-      req.log.warn({ email }, 'tentativa de login fora da allowlist');
-      return reply.type('text/html').code(403)
-        .send(page('Acesso negado', 'Esta conta não está liberada neste servidor.', 'erro'));
-    }
+      // Allowlist — é aqui que o controle de acesso acontece de verdade.
+      if (!email || !profile.email_verified || !config.allowlist.includes(email)) {
+        req.log.warn({ email }, 'tentativa de login fora da allowlist');
+        return reply.type('text/html').code(403)
+          .send(page('Acesso negado', 'Esta conta não está liberada neste servidor.', 'erro'));
+      }
 
-    const user = upsertUser({
-      id: `u_${profile.sub}`,
-      email,
-      name: profile.name ?? email.split('@')[0],
-      avatarUrl: profile.picture ?? null,
-    });
+      const user = upsertUser({
+        id: `u_${profile.sub}`,
+        email,
+        name: profile.name ?? email.split('@')[0],
+        avatarUrl: profile.picture ?? null,
+      });
 
-    const session = await issueSession(user.id);
-    const deepLink = `${config.appProtocol}://auth?token=${encodeURIComponent(session)}`;
+      const session = await issueSession(user.id);
+      const deepLink = `${config.appProtocol}://auth?token=${encodeURIComponent(session)}`;
 
-    // O redirecionamento automático é o caminho normal. O botão existe porque
-    // no Linux o navegador só oferece abrir um esquema desconhecido quando o
-    // clique parte da pessoa: sem ele, o disc:// some em silêncio e o app fica
-    // preso na tela de login mesmo com o Google já tendo aceitado.
-    const botao = `<a class="botao" href="${deepLink}">Abrir a Disneia</a>`;
+      // O redirecionamento automático é o caminho normal. O botão existe porque
+      // no Linux o navegador só oferece abrir um esquema desconhecido quando o
+      // clique parte da pessoa: sem ele, o disc:// some em silêncio e o app fica
+      // preso na tela de login mesmo com o Google já tendo aceitado.
+      const botao = `<a class="botao" href="${deepLink}">Abrir a Disneia</a>`;
 
-    return reply.type('text/html').send(`<!doctype html><meta charset="utf-8">
+      return reply.type('text/html').send(`<!doctype html><meta charset="utf-8">
 <meta http-equiv="refresh" content="0;url=${deepLink}">
 ${page('Tudo certo', 'Pode voltar pro app — já pode fechar esta aba.', 'ok', botao)}
 <script>location.href=${JSON.stringify(deepLink)}</script>`);
+    } catch (err) {
+      // O servidor não alcançou o Google. Não é culpa de quem está entrando, e
+      // o código do OAuth já queimou — o único caminho é recomeçar o login,
+      // então a página entrega o botão que faz exatamente isso.
+      req.log.error({ err }, 'callback do OAuth falhou');
+      const tentarDeNovo = `<a class="botao" href="/auth/login">Tentar de novo</a>`;
+      return reply.type('text/html').code(502).send(
+        page(
+          'Não deu pra concluir',
+          'O servidor não conseguiu falar com o Google agora. Isso costuma passar em alguns segundos.',
+          'erro',
+          tentarDeNovo,
+        ),
+      );
+    }
   });
 }
