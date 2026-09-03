@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { AccessToken } from 'livekit-server-sdk';
 import {
-  config, CHANNELS, isValidChannel, MAX_MESSAGE_LENGTH,
+  config, MAX_CHANNEL_NAME, MAX_MESSAGE_LENGTH,
   MAX_POLL_QUESTION, MAX_POLL_OPTION, MIN_POLL_OPTIONS, MAX_POLL_OPTIONS,
   REACTION_EMOJIS, isValidReaction,
 } from './config.js';
@@ -10,6 +10,7 @@ import {
   recentMessages, saveMessage, touchPresence, setStatus, findUserById,
   findPoll, setVote, messageById, messageOwner, editMessage, deleteMessage,
   toggleReaction, purgeMessage, allUsers, lastReadMessageId, markRead,
+  listChannels, channelExists, channelCount, createChannel, renameChannel, deleteChannel,
   type User, type NovaPoll, type MessageRow,
 } from './db.js';
 import { mencionadosEm } from './texto.js';
@@ -51,6 +52,23 @@ function isAdmin(user: User): boolean {
 }
 
 /**
+ * Exige sessão válida E que a pessoa seja admin. Ver config.admins.
+ *
+ * Responde 401 (sem sessão) ou 403 (logado mas não admin) e retorna null.
+ * Usada pelas rotas de canal — criar/renomear/apagar é coisa do dono do
+ * servidor, o mesmo gate de apagar mensagem dos outros.
+ */
+async function requireAdmin(req: any, reply: any): Promise<User | null> {
+  const user = await requireUser(req, reply);
+  if (!user) return null;
+  if (!isAdmin(user)) {
+    reply.code(403).send({ error: 'só o admin mexe nos canais' });
+    return null;
+  }
+  return user;
+}
+
+/**
  * A mensagem com as URLs dos anexos prontas.
  *
  * Único lugar que faz essa passagem, e por isso todas as rotas que devolvem
@@ -87,7 +105,7 @@ app.get('/api/me', async (req, reply) => {
     name: user.name,
     email: user.email,
     avatarUrl: user.avatar_url,
-    channels: CHANNELS,
+    channels: listChannels(),
     livekitUrl: config.livekit.url,
     // Só pra tela decidir se mostra o botão de apagar a mensagem dos outros.
     // Quem MANDA continua sendo o servidor, que confere de novo na rota — o
@@ -110,7 +128,7 @@ app.post('/api/rooms/:channelId/token', async (req, reply) => {
   if (!user) return;
 
   const { channelId } = req.params as { channelId: string };
-  if (!isValidChannel(channelId)) {
+  if (!channelExists(channelId)) {
     return reply.code(404).send({ error: 'canal inexistente' });
   }
 
@@ -148,7 +166,7 @@ app.post('/api/rooms/:channelId/whip', async (req, reply) => {
   if (!user) return;
 
   const { channelId } = req.params as { channelId: string };
-  if (!isValidChannel(channelId)) {
+  if (!channelExists(channelId)) {
     return reply.code(404).send({ error: 'canal inexistente' });
   }
 
@@ -173,7 +191,82 @@ app.post('/api/rooms/:channelId/whip', async (req, reply) => {
 app.get('/api/presence', async (req, reply) => {
   const user = await requireUser(req, reply);
   if (!user) return;
-  return { channels: await presence(), users: usersPresence() };
+  // `canais` vai junto de propósito: é o polling que já roda a cada 3s pra
+  // todo mundo, então um canal criado/renomeado/apagado por um admin aparece
+  // nas outras telas sem push nem rota nova. `channels` aqui continua sendo
+  // o MAPA de quem está em cada sala — nome infeliz, mas veio de antes.
+  return { channels: await presence(), users: usersPresence(), canais: listChannels() };
+});
+
+/**
+ * Criar canal. Só admin.
+ *
+ * O id sai de um slug do nome mais um sufixo aleatório e é definitivo — ver
+ * createChannel. A lista de canais de todo mundo se atualiza sozinha no
+ * próximo ciclo do /api/presence (3s), sem push.
+ */
+app.post('/api/channels', async (req, reply) => {
+  const user = await requireAdmin(req, reply);
+  if (!user) return;
+
+  if (!rateLimit(`canal:${user.id}`, 20, 60_000)) {
+    return reply.code(429).send({ error: 'devagar aí' });
+  }
+
+  const { name } = (req.body ?? {}) as { name?: unknown };
+  const nome = typeof name === 'string' ? name.trim() : '';
+  if (!nome) return reply.code(400).send({ error: 'o canal precisa de um nome' });
+  if (nome.length > MAX_CHANNEL_NAME) {
+    return reply.code(400).send({ error: 'nome muito longo' });
+  }
+
+  return { channel: createChannel(nome) };
+});
+
+/** Renomear canal. Só admin. Troca só o nome — o id (sala do LiveKit) não muda. */
+app.patch('/api/channels/:id', async (req, reply) => {
+  const user = await requireAdmin(req, reply);
+  if (!user) return;
+
+  if (!rateLimit(`canal:${user.id}`, 20, 60_000)) {
+    return reply.code(429).send({ error: 'devagar aí' });
+  }
+
+  const { id } = req.params as { id: string };
+  const { name } = (req.body ?? {}) as { name?: unknown };
+  const nome = typeof name === 'string' ? name.trim() : '';
+  if (!nome) return reply.code(400).send({ error: 'o canal precisa de um nome' });
+  if (nome.length > MAX_CHANNEL_NAME) {
+    return reply.code(400).send({ error: 'nome muito longo' });
+  }
+
+  const canal = renameChannel(id, nome);
+  if (!canal) return reply.code(404).send({ error: 'canal inexistente' });
+  return { channel: canal };
+});
+
+/**
+ * Apagar canal. Só admin.
+ *
+ * Recusa apagar o último — um servidor sem canal nenhum não tem pra onde
+ * entrar. Não desconecta quem está na sala do LiveKit agora: o cliente
+ * daquela pessoa percebe que o canal sumiu da lista e sai sozinho.
+ *
+ * Idempotente: apagar um id que já não existe responde sucesso. Dois cliques
+ * ou dois admins na mesma ação querem o mesmo fim.
+ */
+app.delete('/api/channels/:id', async (req, reply) => {
+  const user = await requireAdmin(req, reply);
+  if (!user) return;
+
+  const { id } = req.params as { id: string };
+  if (!channelExists(id)) return { removed: true, id };
+  if (channelCount() <= 1) {
+    return reply.code(409).send({ error: 'tem que sobrar pelo menos um canal' });
+  }
+
+  deleteChannel(id);
+  return { removed: true, id };
 });
 
 /**

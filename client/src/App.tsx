@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Me, Message, NovaEnquete, Poll, UserProfile } from './types';
+import type { Channel, Me, Message, NovaEnquete, Poll, UserProfile } from './types';
 import { MAX_ASSISTINDO, useRoom } from './lib/useRoom';
 import { usePresence, useStatus } from './lib/usePresence';
 import { useUpdate, blocksApp } from './lib/useUpdate';
@@ -358,7 +358,43 @@ export function App() {
     void room.updateSettings({ sidebarWidth: px });
   }, [room]);
 
-  const { channels: presence, users } = usePresence(Boolean(loggedIn), room.channelId);
+  const { channels: presence, users, canais } = usePresence(Boolean(loggedIn), room.channelId);
+
+  /**
+   * A lista de canais que a coluna mostra.
+   *
+   * A presença (polling de 3s) é a fonte enquanto responde — é ela que faz
+   * um canal criado por um admin aparecer nas outras telas. Nos primeiros 3s,
+   * antes da primeira volta, cai no que veio no `me`. O servidor nunca deixa
+   * a lista vazia (recusa apagar o último canal), então `canais.length` só é
+   * 0 antes do primeiro retorno.
+   */
+  const channels: Channel[] = canais.length > 0 ? canais : (me?.channels ?? []);
+
+  /**
+   * O canal em que você está sumiu da lista — um admin apagou enquanto você
+   * estava dentro. O LiveKit ainda te segura na sala fantasma; sair aqui é o
+   * que fecha o ciclo. Só age depois que a presença já respondeu ao menos uma
+   * vez (`canais.length > 0`), senão derrubaria você no carregamento.
+   */
+  useEffect(() => {
+    if (!room.channelId || canais.length === 0) return;
+    if (!canais.some((c) => c.id === room.channelId)) void room.disconnect();
+  }, [canais, room]);
+
+  const criarCanal = useCallback(
+    (nome: string) => window.disc.canais.criar(nome).then(() => undefined),
+    [],
+  );
+  const renomearCanal = useCallback(
+    (id: string, nome: string) => window.disc.canais.renomear(id, nome).then(() => undefined),
+    [],
+  );
+  const removerCanal = useCallback(async (id: string) => {
+    await window.disc.canais.remover(id);
+    // Não espera o efeito de cima: se era o canal ativo, sai já.
+    if (room.channelId === id) void room.disconnect();
+  }, [room]);
 
   // Microfone aberto num canal é o que segura o status em "disponível".
   //
@@ -487,8 +523,9 @@ export function App() {
     [users],
   );
 
-  // Nome do canal ativo — o topbar e o ObsSetup usam.
-  const activeName = me?.channels.find((c) => c.id === room.channelId)?.name ?? null;
+  // Nome do canal ativo — o topbar e o ObsSetup usam. Sai da lista viva, não
+  // do me: um canal renomeado troca de nome no topo sem reiniciar o app.
+  const activeName = channels.find((c) => c.id === room.channelId)?.name ?? null;
 
   // No Linux o seletor e do sistema (ver initDisplayMedia no main): abrir o
   // nosso modal por cima so poria uma escolha em cima da outra — e a escolha
@@ -514,8 +551,11 @@ export function App() {
 
       <Sidebar
         me={me}
-        channels={me.channels}
+        channels={channels}
         activeChannel={room.channelId}
+        onCriarCanal={criarCanal}
+        onRenomearCanal={renomearCanal}
+        onRemoverCanal={removerCanal}
         peers={room.peers}
         presence={presence}
         users={users}

@@ -75,17 +75,15 @@ export const config = {
   appProtocol: process.env.APP_PROTOCOL ?? 'disc',
 };
 
-// Servidor único, canais fixos. Nada de criar/deletar sala em runtime.
-export const CHANNELS = [
-  { id: 'sala-1', name: 'Sala 1' },
-  { id: 'sala-2', name: 'Sala 2' },
-] as const;
-
-export type ChannelId = (typeof CHANNELS)[number]['id'];
-
-export function isValidChannel(id: string): id is ChannelId {
-  return CHANNELS.some((c) => c.id === id);
-}
+/**
+ * Teto do nome de um canal.
+ *
+ * A coluna da esquerda tem ~240px e o nome divide a linha com o ícone e a
+ * contagem de gente — passar disso não cabe, só reticencia. A lista de
+ * canais em si mora no banco (tabela `channels`), não aqui: o admin cria e
+ * renomeia em runtime desde a 0.37.
+ */
+export const MAX_CHANNEL_NAME = 40;
 
 export const MAX_MESSAGE_LENGTH = 2000;
 

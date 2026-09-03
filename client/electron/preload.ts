@@ -100,6 +100,12 @@ const api = {
   roomToken: (channelId: string) => ipcRenderer.invoke('api:room-token', channelId),
   whipConfig: (channelId: string) => ipcRenderer.invoke('api:whip-config', channelId),
 
+  canais: {
+    criar: (nome: string) => ipcRenderer.invoke('api:canal-criar', nome),
+    renomear: (id: string, nome: string) => ipcRenderer.invoke('api:canal-renomear', id, nome),
+    remover: (id: string) => ipcRenderer.invoke('api:canal-remover', id),
+  },
+
   profile: {
     of: (identity: string) => ipcRenderer.invoke('api:user', identity),
     patch: (patch: unknown) => ipcRenderer.invoke('api:profile-patch', patch),

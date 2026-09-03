@@ -6,12 +6,20 @@ import type {
 import type { Peer } from '../lib/useRoom';
 import {
   IconSpeaker, IconMic, IconMicOff, IconHeadphones,
-  IconHeadphonesOff, IconLeave, IconSettings,
+  IconHeadphonesOff, IconLeave, IconSettings, IconLapis, IconLixeira,
 } from './Icons';
 import { Avatar } from './Profile';
 import { SidebarResizer } from './SidebarResizer';
 import { STATUS } from '../lib/status';
 import logo from '../assets/logo.png';
+
+/**
+ * Teto do nome de um canal — espelha o MAX_CHANNEL_NAME do servidor.
+ *
+ * Aqui é só o `maxLength` do input, pra não deixar digitar o que a rota vai
+ * recusar. Quem valida de verdade é o servidor.
+ */
+const MAX_NOME_CANAL = 40;
 
 /**
  * Uma linha de participante, venha ela de onde vier.
@@ -83,6 +91,14 @@ interface Props {
   pttDown: boolean;
   onJoin: (channelId: string) => void;
   onLeave: () => void;
+  /**
+   * Criar, renomear e apagar canal. Só chega preenchido pra admin — o botão
+   * some pros outros, e o servidor recusa de novo (403) de qualquer jeito.
+   * As três não mexem na lista aqui: a próxima volta da presença traz.
+   */
+  onCriarCanal: (nome: string) => Promise<void>;
+  onRenomearCanal: (id: string, nome: string) => Promise<void>;
+  onRemoverCanal: (id: string) => Promise<void>;
   onToggleMic: () => void;
   onToggleDeafen: () => void;
   onVolumeChange: (identity: string, volume: number) => void;
@@ -100,8 +116,11 @@ export function Sidebar({
   connecting, micOn, deafened,
   pttMode, pttDown, onJoin, onLeave, onToggleMic, onToggleDeafen,
   onVolumeChange, onOpenSettings, onOpenProfile, onOpenUser,
+  onCriarCanal, onRenomearCanal, onRemoverCanal,
   largura, onLarguraChange,
 }: Props) {
+  const podeEditarCanais = me.isAdmin ?? false;
+  const [criando, setCriando] = useState(false);
   // Este é o estado da CONEXÃO com o canal, não o status de presença. São
   // coisas diferentes: dá pra estar "Disponível" sem estar em canal nenhum.
   const conexao = connecting
@@ -121,7 +140,30 @@ export function Sidebar({
       </div>
 
       <div className="sidebar__scroll">
-        <div className="sidebar__label">Canais de voz</div>
+        <div className="sidebar__label sidebar__label--linha">
+          <span>Canais de voz</span>
+          {podeEditarCanais && !criando && (
+            <button
+              className="sidebar__label-btn"
+              title="Criar canal"
+              onClick={() => setCriando(true)}
+            >
+              +
+            </button>
+          )}
+        </div>
+
+        {criando && (
+          <NomeCanalInput
+            inicial=""
+            placeholder="nome do canal"
+            onConfirmar={async (nome) => {
+              await onCriarCanal(nome);
+              setCriando(false);
+            }}
+            onCancelar={() => setCriando(false)}
+          />
+        )}
 
         {channels.map((ch) => {
           const active = activeChannel === ch.id;
@@ -142,26 +184,19 @@ export function Sidebar({
               }));
 
           return (
-            <div key={ch.id} className={`channel${active ? ' channel--active' : ''}`}>
-              <button className="channel__head" onClick={() => onJoin(ch.id)} disabled={connecting}>
-                <span className="channel__icon"><IconSpeaker size={17} /></span>
-                <span className="channel__name">{ch.name}</span>
-                {members.length > 0 && <span className="channel__count">{members.length}</span>}
-              </button>
-
-              {members.length > 0 && (
-                <div className="channel__members">
-                  {members.map((m) => (
-                    <MemberRow
-                      key={m.identity}
-                      row={m}
-                      onVolumeChange={onVolumeChange}
-                      onOpenUser={onOpenUser}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+            <CanalItem
+              key={ch.id}
+              ch={ch}
+              active={active}
+              connecting={connecting}
+              members={members}
+              podeEditar={podeEditarCanais}
+              onJoin={onJoin}
+              onRenomear={onRenomearCanal}
+              onRemover={onRemoverCanal}
+              onVolumeChange={onVolumeChange}
+              onOpenUser={onOpenUser}
+            />
           );
         })}
 
@@ -282,6 +317,189 @@ function OnlineList({
         </div>
       ))}
     </>
+  );
+}
+
+/**
+ * Um campo de nome de canal — serve tanto pra criar quanto pra renomear.
+ *
+ * Enter confirma, Esc e clicar fora cancelam. Fica desabilitado enquanto a
+ * chamada não volta, pra dois Enter não virarem dois canais. Nome vazio ou
+ * igual ao que já era não chama nada — só fecha.
+ */
+function NomeCanalInput({
+  inicial,
+  placeholder,
+  onConfirmar,
+  onCancelar,
+}: {
+  inicial: string;
+  placeholder?: string;
+  onConfirmar: (nome: string) => Promise<void>;
+  onCancelar: () => void;
+}) {
+  const [valor, setValor] = useState(inicial);
+  const [ocupado, setOcupado] = useState(false);
+  // Guarda síncrona: o Enter (ou o Esc) dispara uma ação e o blur do input
+  // desmontando vem logo atrás. Sem isto, dar Enter criaria dois canais, e
+  // apertar Esc com algo digitado ainda criaria um no blur.
+  const encerrado = useRef(false);
+
+  const cancelar = () => {
+    if (encerrado.current) return;
+    encerrado.current = true;
+    onCancelar();
+  };
+
+  const confirmar = async () => {
+    if (encerrado.current) return;
+    const nome = valor.trim();
+    if (!nome || nome === inicial.trim()) {
+      cancelar();
+      return;
+    }
+    encerrado.current = true;
+    setOcupado(true);
+    try {
+      await onConfirmar(nome);
+    } catch {
+      // A rota recusou (nome, rede, ou o 403 que não devia acontecer aqui).
+      // Volta pro estado de leitura em vez de deixar o campo preso.
+      onCancelar();
+    }
+  };
+
+  return (
+    <form
+      className="channel__nome-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void confirmar();
+      }}
+    >
+      <input
+        className="channel__nome-input"
+        autoFocus
+        value={valor}
+        placeholder={placeholder}
+        maxLength={MAX_NOME_CANAL}
+        disabled={ocupado}
+        onChange={(e) => setValor(e.target.value)}
+        onBlur={() => void confirmar()}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            cancelar();
+          }
+        }}
+      />
+    </form>
+  );
+}
+
+/**
+ * Uma linha de canal na coluna: o botão de entrar, a lista de quem está
+ * dentro e — só pra admin — renomear e apagar.
+ *
+ * `modo` é o que a linha está mostrando: a leitura normal, o campo de
+ * renomear, ou a confirmação de apagar. Um estado só, porque os três são
+ * exclusivos e misturar dois seria a linha mentindo sobre o que um clique faz.
+ */
+function CanalItem({
+  ch, active, connecting, members, podeEditar,
+  onJoin, onRenomear, onRemover, onVolumeChange, onOpenUser,
+}: {
+  ch: Channel;
+  active: boolean;
+  connecting: boolean;
+  members: Row[];
+  podeEditar: boolean;
+  onJoin: (channelId: string) => void;
+  onRenomear: (id: string, nome: string) => Promise<void>;
+  onRemover: (id: string) => Promise<void>;
+  onVolumeChange: (identity: string, volume: number) => void;
+  onOpenUser: (identity: string) => void;
+}) {
+  const [modo, setModo] = useState<'normal' | 'renomeando' | 'apagando'>('normal');
+
+  return (
+    <div className={`channel${active ? ' channel--active' : ''}`}>
+      {modo === 'renomeando' ? (
+        <NomeCanalInput
+          inicial={ch.name}
+          onConfirmar={async (nome) => {
+            await onRenomear(ch.id, nome);
+            setModo('normal');
+          }}
+          onCancelar={() => setModo('normal')}
+        />
+      ) : (
+        <div className="channel__linha">
+          <button
+            className="channel__head"
+            onClick={() => onJoin(ch.id)}
+            disabled={connecting}
+          >
+            <span className="channel__icon"><IconSpeaker size={17} /></span>
+            <span className="channel__name">{ch.name}</span>
+            {members.length > 0 && modo === 'normal' && (
+              <span className="channel__count">{members.length}</span>
+            )}
+          </button>
+
+          {podeEditar && modo === 'normal' && (
+            <div className="channel__acoes">
+              <button
+                className="channel__acao"
+                title="Renomear"
+                onClick={() => setModo('renomeando')}
+              >
+                <IconLapis size={13} />
+              </button>
+              <button
+                className="channel__acao"
+                title="Apagar canal"
+                onClick={() => setModo('apagando')}
+              >
+                <IconLixeira size={13} />
+              </button>
+            </div>
+          )}
+
+          {podeEditar && modo === 'apagando' && (
+            <div className="channel__confirma">
+              <span>Apagar?</span>
+              <button
+                className="channel__confirma-sim"
+                onClick={async () => {
+                  try {
+                    await onRemover(ch.id);
+                  } finally {
+                    setModo('normal');
+                  }
+                }}
+              >
+                sim
+              </button>
+              <button onClick={() => setModo('normal')}>não</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {members.length > 0 && modo === 'normal' && (
+        <div className="channel__members">
+          {members.map((m) => (
+            <MemberRow
+              key={m.identity}
+              row={m}
+              onVolumeChange={onVolumeChange}
+              onOpenUser={onOpenUser}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

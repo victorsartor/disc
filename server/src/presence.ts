@@ -1,6 +1,6 @@
 import { RoomServiceClient, TrackSource, type ParticipantInfo } from 'livekit-server-sdk';
-import { config, CHANNELS } from './config.js';
-import { allUsers, type StatusEfetivo, type User } from './db.js';
+import { config } from './config.js';
+import { allUsers, listChannels, type StatusEfetivo, type User } from './db.js';
 
 /**
  * Sem sinal de vida por este tempo, a pessoa é dada como offline.
@@ -115,7 +115,7 @@ export async function presence(): Promise<Presence> {
   const out: Presence = {};
 
   await Promise.all(
-    CHANNELS.map(async (ch) => {
+    listChannels().map(async (ch) => {
       try {
         out[ch.id] = (await svc.listParticipants(ch.id)).map(toMember);
       } catch {

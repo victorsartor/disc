@@ -581,6 +581,21 @@ ipcMain.handle('api:room-token', (_e, channelId: string) =>
 ipcMain.handle('api:whip-config', (_e, channelId: string) =>
   apiFetch(`/api/rooms/${encodeURIComponent(channelId)}/whip`, { method: 'POST' }));
 
+// --- IPC: canais -------------------------------------------------------
+// O servidor valida nome e confere o admin de novo - aqui e so repasse.
+ipcMain.handle('api:canal-criar', (_e, nome: unknown) =>
+  apiFetch('/api/channels', {
+    method: 'POST',
+    body: JSON.stringify({ name: typeof nome === 'string' ? nome : '' }),
+  }));
+ipcMain.handle('api:canal-renomear', (_e, id: unknown, nome: unknown) =>
+  apiFetch(`/api/channels/${encodeURIComponent(String(id))}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name: typeof nome === 'string' ? nome : '' }),
+  }));
+ipcMain.handle('api:canal-remover', (_e, id: unknown) =>
+  apiFetch(`/api/channels/${encodeURIComponent(String(id))}`, { method: 'DELETE' }));
+
 // --- IPC: captura de tela ------------------------------------------------
 
 /**

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Presence, StatusEfetivo, StatusEscolhido, UserPresence } from '../types';
+import type { Channel, Presence, StatusEfetivo, StatusEscolhido, UserPresence } from '../types';
 
 /**
  * Quem está em cada canal, inclusive nos que você não entrou, e o status de
@@ -15,9 +15,14 @@ import type { Presence, StatusEfetivo, StatusEscolhido, UserPresence } from '../
 export function usePresence(
   enabled: boolean,
   activeChannel: string | null,
-): { channels: Presence; users: UserPresence[] } {
+): { channels: Presence; users: UserPresence[]; canais: Channel[] } {
   const [presence, setPresence] = useState<Presence>({});
   const [users, setUsers] = useState<UserPresence[]>([]);
+  // A lista de canais também vem por aqui: é o polling que já roda pra todo
+  // mundo, então um canal que o admin criou ou renomeou chega às outras
+  // telas em até 3s sem rota nova. Fica [] até a primeira volta — quem usa
+  // cai no me.channels enquanto isso.
+  const [canais, setCanais] = useState<Channel[]>([]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -25,10 +30,11 @@ export function usePresence(
 
     const load = async () => {
       try {
-        const { channels, users } = await window.disc.presence();
+        const { channels, users, canais } = await window.disc.presence();
         if (!alive) return;
         setPresence(channels);
         setUsers(users ?? []);
+        if (canais) setCanais(canais);
       } catch {
         /* offline momentâneo: a próxima volta pega */
       }
@@ -42,7 +48,7 @@ export function usePresence(
     };
   }, [enabled, activeChannel]);
 
-  return { channels: presence, users };
+  return { channels: presence, users, canais };
 }
 
 /**

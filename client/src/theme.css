@@ -324,6 +324,121 @@ textarea {
   gap: 2px;
 }
 
+/* ── Canal: editar (só admin) ───────────────────────────────────────── */
+/* O "Canais de voz" divide a linha com o + de criar. */
+.sidebar__label--linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar__label-btn {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--lavender);
+  transition: background 0.13s, color 0.13s;
+}
+
+.sidebar__label-btn:hover {
+  background: var(--hover);
+  color: var(--alabaster);
+}
+
+/* O botão de entrar e as ações dividem a mesma linha; as ações só aparecem
+   no hover pra não competir com o nome do canal o tempo todo. */
+.channel__linha {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.channel__linha .channel__head {
+  flex: 1;
+  min-width: 0;
+}
+
+.channel__acoes {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.13s;
+}
+
+.channel:hover .channel__acoes,
+.channel__acoes:focus-within {
+  opacity: 1;
+}
+
+.channel__acao {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--lavender);
+  background: var(--level-3);
+  transition: background 0.13s, color 0.13s;
+}
+
+.channel__acao:hover {
+  background: var(--glass);
+  color: var(--alabaster);
+}
+
+.channel__confirma {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--level-3);
+  font-size: 11.5px;
+  color: var(--lavender);
+}
+
+.channel__confirma button {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--lavender);
+}
+
+.channel__confirma button:hover {
+  color: var(--alabaster);
+}
+
+.channel__confirma-sim:hover {
+  color: var(--danger);
+}
+
+.channel__nome-form {
+  padding: 2px 4px 6px;
+}
+
+.channel__nome-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--level-0);
+  border: 1px solid var(--line-strong);
+  color: var(--alabaster);
+  font: inherit;
+  font-weight: 500;
+}
+
+.channel__nome-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* ── Participante ────────────────────────────────────────────────────── */
 .member {
   display: flex;

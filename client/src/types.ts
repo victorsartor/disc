@@ -365,7 +365,7 @@ export interface DiscApi {
   };
   me(): Promise<Me>;
   messages(): Promise<{ messages: Message[] }>;
-  presence(): Promise<{ channels: Presence; users: UserPresence[] }>;
+  presence(): Promise<{ channels: Presence; users: UserPresence[]; canais: Channel[] }>;
   /** Batimento do app aberto. `ativo` renova o relógio dos 10 minutos. */
   heartbeat(ativo: boolean): Promise<{ status: StatusEfetivo }>;
   setStatus(status: StatusEscolhido): Promise<{ status: StatusEscolhido }>;
@@ -468,6 +468,20 @@ export interface DiscApi {
   };
   roomToken(channelId: string): Promise<RoomTokenResponse>;
   whipConfig(channelId: string): Promise<WhipConfig>;
+  /**
+   * Criar, renomear e apagar canal de voz. Só quem é `me.isAdmin` — o
+   * servidor confere de novo (403 pra quem não é), esconder o botão nunca
+   * foi controle de acesso.
+   *
+   * Nenhuma delas mexe na lista local: a coluna se atualiza sozinha no
+   * próximo ciclo da presença (até 3s), que agora também traz os canais.
+   */
+  canais: {
+    criar(nome: string): Promise<{ channel: Channel }>;
+    renomear(id: string, nome: string): Promise<{ channel: Channel }>;
+    /** Idempotente: apagar um id que já sumiu responde sucesso. */
+    remover(id: string): Promise<{ removed: boolean; id: string }>;
+  };
   profile: {
     /** Perfil de qualquer um, pela identity do LiveKit ou pelo id. */
     of(identity: string): Promise<{ user: UserProfile }>;

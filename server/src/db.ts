@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { config } from './config.js';
@@ -153,7 +154,42 @@ db.exec(`
     last_read_message_id  INTEGER NOT NULL DEFAULT 0,
     updated_at            INTEGER NOT NULL
   );
+
+  -- Os canais de voz. Antes era uma lista fixa no config.ts (canais fixos,
+  -- nada de criar sala em runtime); virou tabela na 0.37 pra que o admin
+  -- crie, renomeie e apague sem mexer no código.
+  --
+  -- O id e um slug mais um sufixo aleatorio e NUNCA muda: e o nome da sala
+  -- no LiveKit e a chave da presenca. Renomear troca so o nome. A coluna
+  -- position da a ordem na coluna da esquerda.
+  --
+  -- (Sem crase neste comentario: ele mora dentro de um template literal.)
+  CREATE TABLE IF NOT EXISTS channels (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    position   INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
 `);
+
+/**
+ * Semeia os dois canais que sempre existiram.
+ *
+ * Roda quando a tabela está vazia — banco novo, ou banco antigo que ganhou a
+ * tabela agora. Os ids `sala-1`/`sala-2` são os mesmos de quando eram fixos
+ * no config: quem estava numa call na hora do deploy não é derrubado, e o
+ * histórico de presença continua batendo.
+ */
+if ((db.prepare('SELECT COUNT(*) AS n FROM channels').get() as { n: number }).n === 0) {
+  const agora = Date.now();
+  const ins = db.prepare(
+    'INSERT INTO channels (id, name, position, created_at) VALUES (?, ?, ?, ?)',
+  );
+  db.transaction(() => {
+    ins.run('sala-1', 'Sala 1', 0, agora);
+    ins.run('sala-2', 'Sala 2', 1, agora);
+  })();
+}
 
 /**
  * Backfill de quem já tinha conversa: sem isto, todo mundo abriria esta
@@ -1179,4 +1215,79 @@ export function lastReadMessageId(userId: string): number {
 export function markRead(userId: string, messageId: number): number {
   stmts.setLastRead.run(userId, messageId, Date.now());
   return lastReadMessageId(userId);
+}
+
+// --- Canais de voz ------------------------------------------------------
+/** O que o cliente vê de um canal — o resto (position, created_at) é interno. */
+export interface Channel {
+  id: string;
+  name: string;
+}
+
+const canalStmts = {
+  list: db.prepare('SELECT id, name FROM channels ORDER BY position, created_at'),
+  exists: db.prepare<[string]>('SELECT 1 FROM channels WHERE id = ?'),
+  count: db.prepare('SELECT COUNT(*) AS n FROM channels'),
+  nextPos: db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM channels'),
+  insert: db.prepare(
+    'INSERT INTO channels (id, name, position, created_at) VALUES (?, ?, ?, ?)',
+  ),
+  rename: db.prepare<[string, string]>('UPDATE channels SET name = ? WHERE id = ?'),
+  remove: db.prepare<[string]>('DELETE FROM channels WHERE id = ?'),
+};
+
+export function listChannels(): Channel[] {
+  return canalStmts.list.all() as Channel[];
+}
+
+export function channelExists(id: string): boolean {
+  return canalStmts.exists.get(id) !== undefined;
+}
+
+export function channelCount(): number {
+  return (canalStmts.count.get() as { n: number }).n;
+}
+
+/**
+ * Um slug legível a partir do nome — sem acento, só letra/número e hífen.
+ *
+ * Vira só o começo do id; o sufixo aleatório é quem garante a unicidade.
+ * Nome sem nenhum caractere aproveitável (só emoji, por ex.) cai em 'canal'.
+ */
+function slugificar(nome: string): string {
+  const s = nome
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // tira os acentos que o NFD separou
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24);
+  return s || 'canal';
+}
+
+/**
+ * Cria um canal e devolve {id, name}.
+ *
+ * O id é slug + 4 hex e é definitivo: renomear depois mexe só no `name`.
+ * O loop de colisão quase nunca roda — 16 bits de sufixo pra um punhado de
+ * canais —, mas conferir é barato e o PRIMARY KEY não perdoa.
+ */
+export function createChannel(name: string): Channel {
+  const base = slugificar(name);
+  let id = `${base}-${randomBytes(2).toString('hex')}`;
+  while (channelExists(id)) id = `${base}-${randomBytes(2).toString('hex')}`;
+
+  const position = (canalStmts.nextPos.get() as { p: number }).p;
+  canalStmts.insert.run(id, name, position, Date.now());
+  return { id, name };
+}
+
+/** Renomeia. undefined = não existe canal com esse id. */
+export function renameChannel(id: string, name: string): Channel | undefined {
+  return canalStmts.rename.run(name, id).changes > 0 ? { id, name } : undefined;
+}
+
+/** Apaga. false = não havia nada pra apagar. Não mexe em quem está na sala do LiveKit. */
+export function deleteChannel(id: string): boolean {
+  return canalStmts.remove.run(id).changes > 0;
 }
