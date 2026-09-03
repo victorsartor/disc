@@ -54,6 +54,12 @@
   /* Realce de linha inteira ao passar o mouse (5% de lavanda) */
   --hover: rgba(119, 141, 169, 0.07);
 
+  /* A faixa de cima, dos DOIS lados da divisa vertical: a marca na coluna e
+     a barra do canal no palco. Elas se encostam, então a borda de baixo de
+     uma tem que cair na mesma linha da outra — com altura solta de um lado,
+     o degrau aparece bem no meio da janela. Por isso é uma medida só. */
+  --topbar-h: 52px;
+
   --radius-sm: 4px;
   --radius: 8px;
   --radius-md: 12px;
@@ -159,7 +165,7 @@ textarea {
   top: 0;
   left: 0;
   right: 0;
-  height: 52px;
+  height: var(--topbar-h);
   -webkit-app-region: drag;
 }
 
@@ -241,7 +247,9 @@ textarea {
 }
 
 .sidebar__brand {
-  padding: 16px;
+  height: var(--topbar-h);
+  flex-shrink: 0;
+  padding: 0 16px;
   border-bottom: 1px solid var(--line);
   font-size: 15px;
   font-weight: 600;
@@ -627,7 +635,7 @@ textarea {
 }
 
 .topbar {
-  height: 52px;
+  height: var(--topbar-h);
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
