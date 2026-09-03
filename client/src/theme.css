@@ -708,6 +708,14 @@ textarea {
   flex-direction: column;
   gap: 12px;
   pointer-events: auto;
+  /* A largura é DAQUI, e não do quadro.
+     Com ela no quadro, como `min(var(--tela-w), 100%)`, o percentual apontava
+     de volta pra pilha — que por sua vez encolhia ao conteúdo. Referência
+     circular: o navegador resolve o `100%` contra a área inteira, a pilha
+     esticava pra largura toda e as alças, que moram nas bordas dela,
+     apareciam nas pontas do chat em vez de na janelinha.
+     Aqui o `100%` tem contra o que medir — o overlay tem largura de verdade. */
+  width: min(var(--tela-w, 360px), calc(100% - 32px));
   /* Teto real da pilha. Duas transmissões mais o seu próprio preview, no
      tamanho máximo, somam mais altura do que a janela tem — sem este teto a
      de baixo sairia por trás do composer. Quem cede é a altura dos quadros
@@ -856,9 +864,8 @@ textarea {
    continua garantindo a tela inteira dentro dela, com tarja onde sobra. */
 .quadro {
   position: relative;
-  /* O `min` é o que segura a janelinha numa janela estreita: sem ele a
-     largura salva continuaria valendo e a transmissão sairia por fora. */
-  width: min(var(--tela-w, 360px), 100%);
+  /* Quem tem largura é a pilha; o quadro só a preenche. */
+  width: 100%;
   aspect-ratio: 16 / 9;
   /* Encolhe em altura, e só quando a pilha bate no teto (ver .pilha). O
      aspect-ratio manda enquanto sobra espaço; passando disso, é melhor um
@@ -3052,22 +3059,10 @@ textarea {
 
 
 
-/* Na SUA janelinha a etiqueta só aparece com o mouse em cima. Você já sabe
-   que está compartilhando — o botão vermelho na barra de cima diz isso o
-   tempo todo — e numa janelinha pequena "Você está compartilhando 02:37"
-   cobria metade da imagem que a etiqueta existia pra deixar conferir.
-   Quem ASSISTE continua com a dele fixa: ali o nome responde "de quem é
-   essa tela?", que não é óbvio, e o cronômetro diz há quanto tempo perdeu. */
-.quadro--meu .quadro__label {
-  color: var(--lavender);
-  font-weight: 400;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.quadro--meu:hover .quadro__label {
-  opacity: 1;
-}
+/* A sua própria janelinha não desenha etiqueta nenhuma — o componente nem a
+   renderiza (ver MeuPreview no Stage.tsx). Ela existe pra você CONFERIR o
+   que está indo, e qualquer coisa escrita por cima cobre justamente o que
+   se veio olhar. */
 
 .quadro__acoes {
   position: absolute;

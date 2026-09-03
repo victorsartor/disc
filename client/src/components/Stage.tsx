@@ -17,8 +17,6 @@ interface Props {
   onParar: (identity: string) => void;
   /** Sua própria tela, se você estiver compartilhando. */
   localScreen: MediaStreamTrack | null;
-  /** Quando a SUA transmissão começou. null = você não está compartilhando. */
-  shareStartedAt: number | null;
   /** Canto salvo, já validado pelo processo main. */
   canto: TelaCanto;
   /** Largura salva, já validada pelo processo main. */
@@ -128,7 +126,7 @@ interface Aberto {
  * ocupava o palco todo, foi junto com o palco.
  */
 export function Stage({
-  screens, audios, screenVolumes, onScreenVolume, onParar, localScreen, shareStartedAt,
+  screens, audios, screenVolumes, onScreenVolume, onParar, localScreen,
   canto, largura, onCanto, onLargura,
 }: Props) {
   // Uma por vez: abrir noutro quadro fecha a anterior sozinho.
@@ -355,7 +353,7 @@ export function Stage({
           />
         ))}
 
-        {localScreen && <MeuPreview track={localScreen} startedAt={shareStartedAt} />}
+        {localScreen && <MeuPreview track={localScreen} />}
 
         {/* Uma alça de cada lado, e não só a do lado livre: com uma só, quem
             estivesse com a pilha à direita tinha que atravessar a janelinha
@@ -483,12 +481,7 @@ function Quadro({
  * duas coisas com a mesma cara em cantos diferentes davam a impressão de que
  * uma delas tinha travado.
  */
-function MeuPreview({
-  track, startedAt,
-}: {
-  track: MediaStreamTrack;
-  startedAt: number | null;
-}) {
+function MeuPreview({ track }: { track: MediaStreamTrack }) {
   const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -500,19 +493,17 @@ function MeuPreview({
     };
   }, [track]);
 
+  // Sem etiqueta nenhuma, nem no passar do mouse: quem está transmitindo já
+  // sabe que está, e o botão vermelho na barra de cima diz isso o tempo
+  // todo. Esta janelinha existe pra CONFERIR o que está indo, e qualquer
+  // coisa escrita por cima cobre justamente o que se veio olhar.
+  //
+  // Quem ASSISTE continua com a dele: ali o nome responde "de quem é essa
+  // tela?", que não é óbvio, e o cronômetro diz de quanto já se perdeu.
   return (
     <div className="quadro quadro--meu" title="O que você está compartilhando">
       {/* Mudo obrigatoriamente: é o som que já está saindo da sua máquina. */}
       <video ref={ref} autoPlay playsInline muted />
-      {/* Só no passar do mouse (ver o CSS). Na SUA janelinha esta etiqueta é
-          a única coisa escrita por cima de um vídeo que você já sabe que
-          está mandando — e numa janelinha pequena ela cobria metade da
-          imagem. Quem assiste continua com a dele fixa: ali o nome é a
-          resposta a "de quem é essa tela?", que não é óbvia. */}
-      <div className="quadro__label">
-        <span className="quadro__nome">Você está compartilhando</span>
-        {startedAt !== null && <Cronometro desde={startedAt} />}
-      </div>
     </div>
   );
 }

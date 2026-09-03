@@ -647,7 +647,6 @@ export function App() {
           onScreenVolume={room.setScreenVolume}
           onParar={room.toggleAssistir}
           localScreen={room.localScreen}
-          shareStartedAt={room.shareStartedAt}
           canto={telaCanto}
           largura={telaLargura}
           onCanto={salvarCanto}
