@@ -653,9 +653,22 @@ textarea {
   min-width: 0;
   min-height: 0;
   background: var(--level-1);
-  /* Âncora das transmissões flutuantes, que moram por cima do chat sem
-     ocupar linha nenhuma do fluxo. Ver .flutuantes. */
+}
+
+/* O palco e o chat empilhados. É esta caixa, e não a .main, que ancora a
+   janelinha do seu próprio compartilhamento: presa na .main ela flutuaria
+   por cima do palco também, e cobriria justamente a tela que a pessoa abriu
+   pra ver. Ver .flutuantes.
+
+   O `2 1 0` é o que sobrou do antigo `.chat`: com o palco no ar a conversa
+   fica com 2 partes contra as 3 dele. */
+.main__conversa {
   position: relative;
+  flex: 2 1 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
 .topbar {
@@ -682,18 +695,60 @@ textarea {
   flex: 1;
 }
 
-/* ── Transmissões flutuantes ─────────────────────────────────────────────
-   Não há mais palco. Até a 0.38 as telas compartilhadas eram um irmão do
-   chat e dividiam altura com ele, então quem compartilhasse custava metade
-   da janela a TODO MUNDO — inclusive a quem só queria ler a conversa. Agora
-   flutuam num canto e o chat fica com a altura inteira embaixo.
+/* ── Palco (as telas que você escolheu assistir) ─────────────────────────
+   Divide a altura com o chat em vez de ter um teto fixo. `min-height: 0` é o
+   que permite ele ENCOLHER de verdade dentro do flex — sem isso o quadro
+   empurra o resto pra fora e a parte de baixo da tela compartilhada some.
 
-   A área começa embaixo da barra do canal e para onde o composer começa: a
+   Só existe pra quem abriu alguma live nos botões da barra de cima: sem
+   nenhuma aberta o componente não renderiza e o chat fica com a janela
+   inteira. É o que separa este palco do de antes da 0.39, que aparecia pra
+   todo mundo assim que alguém compartilhava. */
+.stage {
+  position: relative;
+  background: var(--level-0);
+  border-bottom: 1px solid var(--line);
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+  /* Uma coluna por padrão: transmissão sozinha ocupa o palco inteiro. Duas
+     viram duas colunas (.stage--duas). Nunca empilha — a altura é a dimensão
+     escassa aqui, e partir ela ao meio é o que torna a tela ilegível. */
+  grid-template-columns: 1fr;
+  grid-auto-rows: 1fr;
+  flex: 3 1 0;
+  min-height: 0;
+}
+
+.stage--duas {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* O degrau do meio: o palco come o espaço do chat sem fazê-lo sumir — ele
+   continua ali embaixo, em algumas linhas. Quem quer mais que isto vai pra
+   tela cheia, e aí some tudo mesmo. */
+.stage--ampliado {
+  grid-template-columns: 1fr;
+  flex: 8 1 0;
+}
+
+/* Miniatura é clicável: o clique é o que leva pro degrau de cima. */
+.quadro--mini {
+  cursor: pointer;
+}
+
+/* ── A janelinha do SEU compartilhamento ─────────────────────────────────
+   Flutua por cima da conversa. Ela é conferência, não conteúdo: existe pra
+   você ver que está indo o que você acha que está indo, e por isso cabe num
+   canto em vez de tirar altura do chat. A tela dos OUTROS é o contrário — é
+   conteúdo, precisa de área, e mora no palco aí em cima.
+
+   A área começa no topo da conversa e para onde o composer começa: a
    janelinha nunca cobre a caixa de escrever, que é o único lugar da tela em
    que se está prestes a digitar. */
 .flutuantes {
   position: absolute;
-  top: var(--topbar-h);
+  top: 0;
   left: 0;
   right: 0;
   bottom: var(--composer-h, 76px);
@@ -724,10 +779,10 @@ textarea {
      apareciam nas pontas do chat em vez de na janelinha.
      Aqui o `100%` tem contra o que medir — o overlay tem largura de verdade. */
   width: min(var(--tela-w, 360px), calc(100% - 32px));
-  /* Teto real da pilha. Duas transmissões mais o seu próprio preview, no
-     tamanho máximo, somam mais altura do que a janela tem — sem este teto a
-     de baixo sairia por trás do composer. Quem cede é a altura dos quadros
-     (ver o flex-shrink lá), e o `contain` do vídeo cuida do resto. */
+  /* Teto real: no máximo (720px) a janelinha é mais alta que a conversa numa
+     janela baixa, e sem este limite ela sairia por trás do composer. Quem
+     cede é a altura do quadro (ver o flex-shrink lá), e o `contain` do vídeo
+     cuida do resto. */
   max-height: calc(100% - 32px);
   /* Volta pro canto com um movimento curto em vez de teleportar: é o que
      mostra que o gesto GRUDOU num canto, e não que a janelinha ficou onde a
@@ -865,20 +920,13 @@ textarea {
   }
 }
 
-/* Agora o aspect-ratio É o certo, ao contrário de quando isto morava no
-   palco: lá a altura era escassa e forçar 16/9 cortava o quadro por baixo;
-   aqui a janelinha é dona da própria caixa, e sem uma proporção fixa a pilha
-   mudaria de altura a cada transmissão que entra. O `contain` do vídeo
-   continua garantindo a tela inteira dentro dela, com tarja onde sobra. */
+/* A moldura, igual nos dois lugares: no palco e na janelinha. Sem
+   aspect-ratio aqui de propósito — no palco a altura é o que existe, e
+   forçar 16/9 deixaria o quadro mais alto que a faixa disponível, com o
+   excedente cortado embaixo. Quem garante a tela inteira dentro da moldura é
+   o `object-fit: contain` do vídeo, com tarja onde sobra. */
 .quadro {
   position: relative;
-  /* Quem tem largura é a pilha; o quadro só a preenche. */
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  /* Encolhe em altura, e só quando a pilha bate no teto (ver .pilha). O
-     aspect-ratio manda enquanto sobra espaço; passando disso, é melhor um
-     quadro mais achatado do que um que vaza pra fora da área. */
-  flex-shrink: 1;
   min-height: 0;
   /* Preto puro, e não --level-0: isto é a tarja do letterbox que sobra em
      volta do `object-fit: contain`. Um fundo azulado ali vira moldura
@@ -888,6 +936,19 @@ textarea {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   overflow: hidden;
+}
+
+/* A janelinha do seu compartilhamento. Aqui o aspect-ratio É o certo, ao
+   contrário do palco: ela é dona da própria caixa, e sem uma proporção fixa
+   a altura dela mudaria conforme a tela que você escolheu compartilhar. */
+.quadro--meu {
+  /* Quem tem largura é a pilha; o quadro só a preenche. */
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  /* Encolhe em altura, e só quando a pilha bate no teto (ver .pilha). O
+     aspect-ratio manda enquanto sobra espaço; passando disso, é melhor um
+     quadro mais achatado do que um que vaza pra fora da área. */
+  flex-shrink: 1;
   /* Flutua sobre a conversa, então precisa se descolar dela — é o único
      lugar do app com sombra de verdade em vez de contorno, e é porque aqui
      a profundidade é literal: tem texto passando por baixo. */
@@ -1036,9 +1097,10 @@ textarea {
 }
 
 /* ── Chat ────────────────────────────────────────────────────────────── */
-/* A altura inteira, sempre. Antes eram 2 contra os 3 do palco, e quem
-   compartilhasse tirava mais da metade da janela de todo mundo; hoje a
-   transmissão flutua por cima e não disputa espaço com a conversa. */
+/* Preenche a .main__conversa; quem divide altura com o palco é ela, não o
+   chat. Sem live aberta a conversa é a única coisa no fluxo e fica com a
+   janela inteira — e quem só quer ler nunca paga pelo que os outros estão
+   compartilhando. */
 .chat {
   flex: 1;
   display: flex;

@@ -9,6 +9,7 @@ import { Login } from './components/Login';
 import { Updater } from './components/Updater';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
+import { Preview } from './components/Preview';
 import { RoomAudio } from './components/RoomAudio';
 import { Chat } from './components/Chat';
 import { ScreenPicker } from './components/ScreenPicker';
@@ -628,42 +629,55 @@ export function App() {
           )}
         </div>
 
+        {/* O palco, com as telas que você escolheu assistir. Fora da conversa
+            de propósito: ele divide altura com o chat, então quando não há
+            nenhuma live aberta ele nem renderiza e o chat fica com tudo. */}
         <Stage
           screens={room.screens}
           audios={room.audios}
           screenVolumes={room.screenVolumes}
           onScreenVolume={room.setScreenVolume}
           onParar={room.toggleAssistir}
-          localScreen={room.localScreen}
-          canto={telaCanto}
-          largura={telaLargura}
-          onCanto={salvarCanto}
-          onLargura={salvarTelaLargura}
         />
-        <Chat
-          messages={messages}
-          onSend={sendChat}
-          onOpenUser={openUser}
-          chatVolume={room.settings?.chatVolume ?? 100}
-          meId={me.id}
-          // Padrões defensivos: um servidor anterior a esta versão não manda
-          // nenhum dos dois, e um reactionEmojis undefined quebraria o .map
-          // da tirinha em vez de só não desenhar nada.
-          isAdmin={me.isAdmin ?? false}
-          reactionEmojis={me.reactionEmojis ?? []}
-          // Da presença: todo mundo do servidor, não só quem está em call.
-          // Dá pra mencionar quem está offline — ele lê quando voltar.
-          gente={gente}
-          nomeDe={nomeDe}
-          onApurarPoll={aplicarPoll}
-          onVotou={room.broadcastVote}
-          onEditar={editarMensagem}
-          onApagar={apagarMensagem}
-          onReagir={reagir}
-          onRemoverDeVez={removerDeVez}
-          unreadAfterId={unreadAfterIdRef.current}
-          onLerMensagens={marcarLido}
-        />
+
+        {/* A sua própria tela flutua por cima da CONVERSA, e não do app
+            inteiro: ancorada aqui, ela nunca cobre o palco de quem você está
+            assistindo — que é justamente o que se veio ver. */}
+        <div className="main__conversa">
+          {room.localScreen && (
+            <Preview
+              track={room.localScreen}
+              canto={telaCanto}
+              largura={telaLargura}
+              onCanto={salvarCanto}
+              onLargura={salvarTelaLargura}
+            />
+          )}
+          <Chat
+            messages={messages}
+            onSend={sendChat}
+            onOpenUser={openUser}
+            chatVolume={room.settings?.chatVolume ?? 100}
+            meId={me.id}
+            // Padrões defensivos: um servidor anterior a esta versão não manda
+            // nenhum dos dois, e um reactionEmojis undefined quebraria o .map
+            // da tirinha em vez de só não desenhar nada.
+            isAdmin={me.isAdmin ?? false}
+            reactionEmojis={me.reactionEmojis ?? []}
+            // Da presença: todo mundo do servidor, não só quem está em call.
+            // Dá pra mencionar quem está offline — ele lê quando voltar.
+            gente={gente}
+            nomeDe={nomeDe}
+            onApurarPoll={aplicarPoll}
+            onVotou={room.broadcastVote}
+            onEditar={editarMensagem}
+            onApagar={apagarMensagem}
+            onReagir={reagir}
+            onRemoverDeVez={removerDeVez}
+            unreadAfterId={unreadAfterIdRef.current}
+            onLerMensagens={marcarLido}
+          />
+        </div>
       </div>
 
       {picking && (
