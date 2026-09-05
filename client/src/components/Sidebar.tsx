@@ -284,21 +284,21 @@ export function Sidebar({
           </button>
 
           <button
-            className={`iconbtn${sharing ? ' iconbtn--on' : ''}`}
-            onClick={onToggleShare}
-            disabled={!activeChannel}
-            title={sharing ? 'Parar de compartilhar' : 'Compartilhar tela'}
-          >
-            <IconScreen />
-          </button>
-
-          <button
             className={`iconbtn${deafened ? ' iconbtn--on' : ''}`}
             onClick={onToggleDeafen}
             disabled={!activeChannel}
             title="Ensurdecer"
           >
             {deafened ? <IconHeadphonesOff /> : <IconHeadphones />}
+          </button>
+
+          <button
+            className={`iconbtn${sharing ? ' iconbtn--on' : ''}`}
+            onClick={onToggleShare}
+            disabled={!activeChannel}
+            title={sharing ? 'Parar de compartilhar' : 'Compartilhar tela'}
+          >
+            <IconScreen />
           </button>
 
           <button className="iconbtn" onClick={onOpenSettings} title="Configurações">
