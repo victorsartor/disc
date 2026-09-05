@@ -6,7 +6,7 @@ import type {
 import type { Peer } from '../lib/useRoom';
 import {
   IconSpeaker, IconMic, IconMicOff, IconHeadphones,
-  IconHeadphonesOff, IconLeave, IconSettings, IconLapis, IconLixeira,
+  IconHeadphonesOff, IconScreen, IconLeave, IconSettings, IconLapis, IconLixeira,
 } from './Icons';
 import { Avatar } from './Profile';
 import { SidebarResizer } from './SidebarResizer';
@@ -87,6 +87,8 @@ interface Props {
   connecting: boolean;
   micOn: boolean;
   deafened: boolean;
+  /** Se a SUA tela está sendo compartilhada agora. */
+  sharing: boolean;
   pttMode: boolean;
   pttDown: boolean;
   onJoin: (channelId: string) => void;
@@ -101,6 +103,7 @@ interface Props {
   onRemoverCanal: (id: string) => Promise<void>;
   onToggleMic: () => void;
   onToggleDeafen: () => void;
+  onToggleShare: () => void;
   onVolumeChange: (identity: string, volume: number) => void;
   onOpenSettings: () => void;
   onOpenProfile: () => void;
@@ -113,8 +116,8 @@ interface Props {
 
 export function Sidebar({
   me, channels, activeChannel, peers, presence, users, status,
-  connecting, micOn, deafened,
-  pttMode, pttDown, onJoin, onLeave, onToggleMic, onToggleDeafen,
+  connecting, micOn, deafened, sharing,
+  pttMode, pttDown, onJoin, onLeave, onToggleMic, onToggleDeafen, onToggleShare,
   onVolumeChange, onOpenSettings, onOpenProfile, onOpenUser,
   onCriarCanal, onRenomearCanal, onRemoverCanal,
   largura, onLarguraChange,
@@ -278,6 +281,15 @@ export function Sidebar({
             title={pttMode ? 'Em modo apertar para falar' : 'Microfone'}
           >
             {micOn ? <IconMic /> : <IconMicOff />}
+          </button>
+
+          <button
+            className={`iconbtn${sharing ? ' iconbtn--on' : ''}`}
+            onClick={onToggleShare}
+            disabled={!activeChannel}
+            title={sharing ? 'Parar de compartilhar' : 'Compartilhar tela'}
+          >
+            <IconScreen />
           </button>
 
           <button

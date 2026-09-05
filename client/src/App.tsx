@@ -15,7 +15,7 @@ import { Chat } from './components/Chat';
 import { ScreenPicker } from './components/ScreenPicker';
 import { Settings } from './components/Settings';
 import { Profile, UserCard } from './components/Profile';
-import { IconScreen, IconEye, IconEyeOff } from './components/Icons';
+import { IconEye, IconEyeOff } from './components/Icons';
 import { DEFAULT_THEME, isThemeId, type ThemeId } from './lib/themes';
 import { playNotify, playMention } from './lib/sounds';
 
@@ -584,12 +584,14 @@ export function App() {
         connecting={room.connecting}
         micOn={room.micOn}
         deafened={room.deafened}
+        sharing={room.sharing}
         pttMode={room.settings?.voiceMode === 'ptt'}
         pttDown={room.pttDown}
         onJoin={(id) => void room.connect(id)}
         onLeave={() => void room.disconnect()}
         onToggleMic={room.toggleMic}
         onToggleDeafen={room.toggleDeafen}
+        onToggleShare={onShareClick}
         onVolumeChange={room.setPeerVolume}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenProfile={() => setProfileOpen(true)}
@@ -615,18 +617,6 @@ export function App() {
           )}
           <span className="topbar__spacer" />
           {room.channelId && <Ping ms={room.ping} />}
-          {room.channelId && (
-            <>
-              <button
-                className={`btn ${room.sharing ? 'btn--danger' : 'btn--ghost'}`}
-                onClick={onShareClick}
-                style={{ display: 'flex', alignItems: 'center', gap: 7 }}
-              >
-                <IconScreen size={15} />
-                {room.sharing ? 'Parar de compartilhar' : 'Compartilhar tela'}
-              </button>
-            </>
-          )}
         </div>
 
         {/* O palco, com as telas que você escolheu assistir. Fora da conversa
