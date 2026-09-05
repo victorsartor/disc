@@ -624,7 +624,9 @@ export function useRoom(
           .on(RoomEvent.TrackUnmuted, syncPeers)
           .on(RoomEvent.LocalTrackPublished, syncPeers)
           .on(RoomEvent.LocalTrackUnpublished, syncPeers)
-          .on(RoomEvent.Disconnected, () => {
+          .on(RoomEvent.Disconnected, (reason) => {
+            // DIAGNOSTICO TEMPORARIO (bug dos atalhos, 05/09/2026) - tirar depois.
+            void window.disc.debugLog(`RoomEvent.Disconnected: reason=${reason}`);
             roomRef.current = null;
             micRef.current?.fechar();
             micRef.current = null;
