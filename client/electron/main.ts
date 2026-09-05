@@ -14,7 +14,7 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
   getSettings, patchSettings, setVolume, setScreenVolume, sanitizePatch,
-  type AcaoDeAtalho, debugLog,
+  type AcaoDeAtalho,
 } from './settings.js';
 import {
   init as initPtt, syncWithSettings as syncPtt, shutdown as shutdownPtt,
@@ -310,10 +310,7 @@ if (!app.requestSingleInstanceLock()) {
       // microfone vive: daqui sai so o nome da acao. O main mandar
       // "desligue o mic" exigiria ele saber se o mic ja esta ligado, e esse
       // e justamente o tipo de estado duplicado que sai de sincronia.
-      (acao) => {
-        debugLog(`enviando atalho:acionado=${acao} win=${!!win} destruido=${win?.isDestroyed()}`);
-        win?.webContents.send('atalho:acionado', acao);
-      },
+      (acao) => win?.webContents.send('atalho:acionado', acao),
     );
     syncPtt();
 
@@ -772,12 +769,6 @@ ipcMain.handle('clipboard:write', (_e, text: string) => {
 
 ipcMain.handle('settings:cancel-capture', () => {
   cancelCapture();
-});
-
-// DIAGNOSTICO TEMPORARIO (bug dos atalhos, 05/09/2026) - tirar junto com o
-// resto. Deixa o renderer escrever no mesmo log do main.
-ipcMain.handle('debug:log', (_e, msg: unknown) => {
-  if (typeof msg === 'string') debugLog(`[renderer] ${msg}`);
 });
 
 // --- IPC: perfil ---------------------------------------------------------

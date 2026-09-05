@@ -1,5 +1,5 @@
 import { uIOhook, UiohookKey } from 'uiohook-napi';
-import { getSettings, ACOES_DE_ATALHO, type AcaoDeAtalho, debugLog } from './settings.js';
+import { getSettings, ACOES_DE_ATALHO, type AcaoDeAtalho } from './settings.js';
 
 /**
  * Hold-to-talk global e atalhos globais.
@@ -226,7 +226,6 @@ function bindHandlers(): void {
     // microfone aberto sem ninguem perceber.
     const acao = acaoDaTecla(e.keycode);
     if (acao) {
-      debugLog(`atalho casou: acao=${acao} keycode=${e.keycode} segurada=${atalhosSegurados.has(e.keycode)}`);
       if (atalhosSegurados.has(e.keycode)) return; // auto-repeat do SO
       atalhosSegurados.add(e.keycode);
       atalhoListener?.(acao);
@@ -260,21 +259,16 @@ function bindHandlers(): void {
 }
 
 function start(): boolean {
-  if (running) {
-    debugLog('start(): ja estava rodando');
-    return true;
-  }
+  if (running) return true;
   try {
     bindHandlers();
     uIOhook.start();
     running = true;
     available = true;
-    debugLog('start(): hook subiu ok');
   } catch (err) {
     // Acontece principalmente em Wayland, que bloqueia captura global de
     // teclado por design. O app continua funcionando no modo VAD.
     console.warn('hook de teclado global indisponivel:', err);
-    debugLog(`start(): falhou - ${err}`);
     available = false;
     running = false;
   }
@@ -306,10 +300,7 @@ function stop(): void {
  * quem nao usa nenhum dos dois nao tem hook de teclado nenhum rodando.
  */
 export function syncWithSettings(): void {
-  const s = getSettings();
-  const deve = s.voiceMode === 'ptt' || temAtalho();
-  debugLog(`syncWithSettings: voiceMode=${s.voiceMode} temAtalho=${temAtalho()} atalhos=${JSON.stringify(s.atalhos)} -> ${deve ? 'start' : 'stop'}`);
-  if (deve) start();
+  if (getSettings().voiceMode === 'ptt' || temAtalho()) start();
   else stop();
 }
 

@@ -624,9 +624,7 @@ export function useRoom(
           .on(RoomEvent.TrackUnmuted, syncPeers)
           .on(RoomEvent.LocalTrackPublished, syncPeers)
           .on(RoomEvent.LocalTrackUnpublished, syncPeers)
-          .on(RoomEvent.Disconnected, (reason) => {
-            // DIAGNOSTICO TEMPORARIO (bug dos atalhos, 05/09/2026) - tirar depois.
-            void window.disc.debugLog(`RoomEvent.Disconnected: reason=${reason}`);
+          .on(RoomEvent.Disconnected, () => {
             roomRef.current = null;
             micRef.current?.fechar();
             micRef.current = null;
@@ -851,8 +849,6 @@ export function useRoom(
 
   useEffect(() => {
     const room = roomRef.current;
-    // DIAGNOSTICO TEMPORARIO (bug dos atalhos, 05/09/2026) - tirar depois.
-    void window.disc.debugLog(`efeito micLive: room=${!!room} channelId=${channelId} micLive=${micLive}`);
     if (!room || !channelId) return;
     void room.localParticipant.setMicrophoneEnabled(micLive).then(syncPeers);
   }, [micLive, channelId, syncPeers]);
@@ -865,8 +861,6 @@ export function useRoom(
    * te ouvisse, porque a invariante acima manda calar.
    */
   const toggleMic = useCallback(() => {
-    // DIAGNOSTICO TEMPORARIO (bug dos atalhos, 05/09/2026) - tirar depois.
-    void window.disc.debugLog(`toggleMic chamado: room=${!!roomRef.current} micWanted-antes=${micWanted} deafened=${deafenedRef.current}`);
     if (deafenedRef.current) {
       deafenedRef.current = false;
       setDeafened(false);
@@ -884,8 +878,6 @@ export function useRoom(
 
   const toggleDeafen = useCallback(() => {
     const room = roomRef.current;
-    // DIAGNOSTICO TEMPORARIO (bug dos atalhos, 05/09/2026) - tirar depois.
-    void window.disc.debugLog(`toggleDeafen chamado: room=${!!room} deafened-antes=${deafened}`);
     if (!room) return;
     const next = !deafened;
     // SO o microfone. Antes isto derrubava todas as faixas de audio da pessoa,
@@ -1351,15 +1343,10 @@ export function useRoom(
   // de que abrir o mic ensurdecido desfaz o surdo junto (ver toggleMic).
   // Um caminho separado pro atalho seria uma segunda definicao de "mudo",
   // e as duas divergiriam na primeira mudanca de regra.
-  useEffect(() => {
-    // DIAGNOSTICO TEMPORARIO (bug dos atalhos, 05/09/2026) - tirar depois.
-    void window.disc.debugLog(`onAtalho efeito (re)inscrito, channelId=${channelId}`);
-    return window.disc.onAtalho((acao) => {
-      void window.disc.debugLog(`onAtalho recebido: acao=${acao} channelId=${channelId}`);
-      if (acao === 'mudo') toggleMic();
-      else if (acao === 'surdo') toggleDeafen();
-    });
-  }, [toggleMic, toggleDeafen, channelId]);
+  useEffect(() => window.disc.onAtalho((acao) => {
+    if (acao === 'mudo') toggleMic();
+    else if (acao === 'surdo') toggleDeafen();
+  }), [toggleMic, toggleDeafen]);
 
   // Desconecta limpo ao fechar o app
   useEffect(() => () => void roomRef.current?.disconnect(), []);
