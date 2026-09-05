@@ -209,11 +209,6 @@ function bindHandlers(): void {
   if (handlersBound) return;
 
   uIOhook.on('keydown', (e) => {
-    // DIAGNOSTICO TEMPORARIO: toda tecla que o hook global recebe, pra
-    // confirmar se ele esta vivo e com que keycode. Ver debugLog em
-    // settings.ts - tirar junto com o resto do diagnostico.
-    debugLog(`keydown bruto: keycode=${e.keycode} capturando=${!!captureResolve}`);
-
     // Modo de captura: le a proxima tecla e encerra imediatamente.
     if (captureResolve) {
       const resolve = captureResolve;

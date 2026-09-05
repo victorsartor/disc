@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { join } from 'node:path';
-import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { appendFile } from 'node:fs/promises';
 
 /**
  * DIAGNOSTICO TEMPORARIO (bug dos atalhos que nao disparam, 05/09/2026).
@@ -8,17 +9,23 @@ import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
  * Grava num arquivo em vez de console.log porque o app empacotado nao tem
  * terminal nenhum grudado - console.log daqui simplesmente nao vai a lugar
  * nenhum. Tirar assim que o bug for encontrado.
+ *
+ * ASSINCRONO DE PROPOSITO: a primeira versao usava appendFileSync, e
+ * chamava ela a CADA tecla que o gancho global via - inclusive as de
+ * digitar uma mensagem qualquer, em qualquer app. O I/O sincrono dentro do
+ * callback do hook do Windows (WH_KEYBOARD_LL) e exatamente o que o
+ * Windows pune: um hook global lento demais pra responder pode ser
+ * DESREGISTRADO em silencio pelo SO, sem o app saber. Foi provavelmente
+ * isso que apagou o proprio atalho no meio do diagnostico.
  */
 export function debugLog(msg: string): void {
-  try {
-    appendFileSync(
-      join(app.getPath('userData'), 'atalhos-debug.log'),
-      `${new Date().toISOString()} ${msg}\n`,
-      'utf8',
-    );
-  } catch {
+  void appendFile(
+    join(app.getPath('userData'), 'atalhos-debug.log'),
+    `${new Date().toISOString()} ${msg}\n`,
+    'utf8',
+  ).catch(() => {
     /* diagnostico nao pode derrubar nada */
-  }
+  });
 }
 
 export type VoiceMode = 'vad' | 'ptt';
