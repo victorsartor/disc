@@ -165,6 +165,10 @@ const api = {
     ipcRenderer.on('atalho:acionado', h);
     return () => ipcRenderer.off('atalho:acionado', h);
   },
+
+  // DIAGNOSTICO TEMPORARIO (bug dos atalhos, 05/09/2026) - tirar junto com
+  // o resto do diagnostico.
+  debugLog: (msg: string) => ipcRenderer.invoke('debug:log', msg),
 };
 
 contextBridge.exposeInMainWorld('disc', api);

@@ -1344,9 +1344,11 @@ export function useRoom(
   // Um caminho separado pro atalho seria uma segunda definicao de "mudo",
   // e as duas divergiriam na primeira mudanca de regra.
   useEffect(() => window.disc.onAtalho((acao) => {
+    // DIAGNOSTICO TEMPORARIO (bug dos atalhos, 05/09/2026) - tirar depois.
+    void window.disc.debugLog(`onAtalho recebido: acao=${acao} channelId=${channelId}`);
     if (acao === 'mudo') toggleMic();
     else if (acao === 'surdo') toggleDeafen();
-  }), [toggleMic, toggleDeafen]);
+  }), [toggleMic, toggleDeafen, channelId]);
 
   // Desconecta limpo ao fechar o app
   useEffect(() => () => void roomRef.current?.disconnect(), []);

@@ -570,6 +570,8 @@ export interface DiscApi {
    * apertada; quem alterna é este lado.
    */
   onAtalho(cb: (acao: AcaoDeAtalho) => void): () => void;
+  /** DIAGNOSTICO TEMPORARIO (bug dos atalhos, 05/09/2026) - tirar depois. */
+  debugLog(msg: string): Promise<void>;
 }
 
 declare global {

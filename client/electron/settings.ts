@@ -1,6 +1,25 @@
 import { app } from 'electron';
 import { join } from 'node:path';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+
+/**
+ * DIAGNOSTICO TEMPORARIO (bug dos atalhos que nao disparam, 05/09/2026).
+ *
+ * Grava num arquivo em vez de console.log porque o app empacotado nao tem
+ * terminal nenhum grudado - console.log daqui simplesmente nao vai a lugar
+ * nenhum. Tirar assim que o bug for encontrado.
+ */
+export function debugLog(msg: string): void {
+  try {
+    appendFileSync(
+      join(app.getPath('userData'), 'atalhos-debug.log'),
+      `${new Date().toISOString()} ${msg}\n`,
+      'utf8',
+    );
+  } catch {
+    /* diagnostico nao pode derrubar nada */
+  }
+}
 
 export type VoiceMode = 'vad' | 'ptt';
 
